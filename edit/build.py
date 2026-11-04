@@ -103,7 +103,8 @@ subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SRC, "-filter_complex", gra
                 "-c:a", "aac", "-b:a", "192k", "-ar", "48000", audio], check=True)
 
 # ---------------------------------------------------------------- caption layers
-f_cap = ImageFont.truetype(FONT_DIR + "Inter-Medium.otf", 60)
+CAP_SIZE, CAP_LH = 40, 54
+f_cap = ImageFont.truetype(FONT_DIR + "Inter-Medium.otf", CAP_SIZE)
 
 def render_caption(text):
     tokens, hl = [], False
@@ -118,23 +119,24 @@ def render_caption(text):
             hl = False
     d = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     sp = d.textlength(" ", font=f_cap)
-    lines, maxw = [[]], 900
-    for tok in tokens:
-        trial = " ".join(x for x, _ in lines[-1] + [tok])
-        if lines[-1] and d.textlength(trial, font=f_cap) > maxw:
-            lines.append([])
-        lines[-1].append(tok)
-    if len(lines) == 2:
-        # prefer breaking right before the highlighted phrase if both lines fit
-        hi = next((i for i, (_, h) in enumerate(tokens) if h), None)
-        if hi:
-            l0, l1 = tokens[:hi], tokens[hi:]
-            if all(d.textlength(" ".join(x for x, _ in l), font=f_cap) <= maxw for l in (l0, l1)):
-                lines = [l0, l1]
-        if len(lines[1]) == 1 and len(lines[0]) > 2:   # avoid orphan word
-            lines[1].insert(0, lines[0].pop())
-    LH = 80
-    img = Image.new("RGBA", (W, LH * len(lines) + 40), (0, 0, 0, 0))
+    maxw = 1000
+    tw = lambda l: d.textlength(" ".join(x for x, _ in l), font=f_cap)
+    if tw(tokens) <= maxw:
+        lines = [tokens]
+    else:
+        # two balanced lines; small bonus for breaking right before a highlight
+        best = None
+        for i in range(1, len(tokens)):
+            l0, l1 = tokens[:i], tokens[i:]
+            if tw(l0) > maxw or tw(l1) > maxw:
+                continue
+            score = max(tw(l0), tw(l1)) - (40 if tokens[i][1] and not tokens[i - 1][1] else 0) \
+                + (400 if tokens[i][1] and tokens[i - 1][1] else 0)   # never split a highlight
+            if best is None or score < best[0]:
+                best = (score, [l0, l1])
+        lines = best[1]
+    LH = CAP_LH
+    img = Image.new("RGBA", (W, LH * len(lines) + 30), (0, 0, 0, 0))
     shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
     ds, dt = ImageDraw.Draw(shadow), ImageDraw.Draw(img)
     layout = []
@@ -148,12 +150,12 @@ def render_caption(text):
             layout.append((x, y, word, h, ul_end))
             x += wl + sp
     for x, y, word, h, _ in layout:
-        ds.text((x, y + 3), word, font=f_cap, fill=(0, 0, 0, 170))
-    img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(7)))
+        ds.text((x, y + 2), word, font=f_cap, fill=(0, 0, 0, 175))
+    img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(5)))
     for x, y, word, h, ul_end in layout:
         dt.text((x, y), word, font=f_cap, fill=GOLD + (255,) if h else (255, 255, 255, 255))
         if h:
-            dt.line((x, y + 74, ul_end, y + 74), fill=GOLD + (210,), width=2)
+            dt.line((x, y + 50, ul_end, y + 50), fill=GOLD + (190,), width=2)
     return np.asarray(img).astype(np.float32) / 255
 
 cap_events = []
@@ -167,7 +169,7 @@ if not args.no_captions:
         else:
             n1 = BODY - 0.1
         cap_events.append((n0, n1, render_caption(text)))
-CAP_Y = 1400   # top of caption block; stays above Reels/Ads UI at the bottom
+CAP_Y = 1480   # top of caption block; stays above Reels/Ads UI at the bottom
 
 # ---------------------------------------------------------------- logo
 logo = Image.open(LOGO)
@@ -232,7 +234,7 @@ for k, (s0, s1) in enumerate(segs):
             for n0, n1, layer in cap_events:
                 if n0 <= t < n1:
                     al = ease((t - n0) / 0.22) * ease((n1 - t) / 0.15)
-                    rise = (1 - ease((t - n0) / 0.30)) * 8
+                    rise = (1 - ease((t - n0) / 0.30)) * 5
                     over(fr, layer, 0, CAP_Y + rise, al)
             over(fr, logo_small, *LOGO_POS, 0.85 * ease(t / 0.6))
             enc.stdin.write((fr * 255 + 0.5).astype(np.uint8).tobytes())
