@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from captions import CAPTIONS, DRAMATIC_AFTER
+import chart_plate
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "source", "raw.mp4")
@@ -277,7 +278,7 @@ def ease(x):
     return x * x * (3 - 2 * x)
 
 def make_card(path, width):
-    im = Image.open(path).convert("RGB")
+    im = (Image.open(path) if isinstance(path, str) else path).convert("RGB")
     target = (width, round(im.height * width / im.width))
     if width > im.width * 1.3:   # low-res source: upscale in two steps, then crisp up the text
         mid = (round((im.width + width) / 2), round((im.height + target[1]) / 2))
@@ -332,6 +333,82 @@ def broll(fr, t):
         ch, cw = card.shape[:2]
         c = resize_f(card, (round(cw * sc), round(ch * sc)))
         over_clip(base, c, (W - c.shape[1]) / 2 + dx, CARD_CY - c.shape[0] / 2, alpha)
+    return base
+
+
+# ---------------------------------------------------------------- animated risk chart
+# Over "knowing your risk ... at your home": the Longitudinal Care infographic as a
+# static card; only its risk curve draws itself from High to Low risk, in step with
+# the words, with each risk pill fading in as the line reaches its marker.
+IG_PATH = os.path.join(ROOT, "assets", "longitudinal_chart.png")
+IG_W = 1000
+ig_orig, ig_clean, ig_curve = chart_plate.build(IG_PATH)
+IG_CARD_ORIG = make_card(Image.fromarray((ig_orig * 255).astype(np.uint8)), IG_W)
+IG_CARD_CLEAN = make_card(Image.fromarray((ig_clean * 255 + 0.5).astype(np.uint8)), IG_W)
+IG_SC = IG_W / ig_orig.shape[1]
+IG_PAD = 40
+IG_CY = 470
+IG_START = to_new(16.62) - 0.40
+IG_END = to_new(27.14) + 0.40
+# curve tip position (image px) at word times (original timeline)
+IG_KEYS = [(16.70, chart_plate.PX0), (17.30, chart_plate.DOTS_X[0]), (18.55, chart_plate.DOTS_X[1]),
+           (19.45, chart_plate.DOTS_X[2]), (22.30, 1612)]
+IG_KEYS = [(to_new(t), x) for t, x in IG_KEYS]
+print(f"risk chart {IG_START:.2f}-{IG_END:.2f}s")
+
+def ig_tip(t):
+    if t <= IG_KEYS[0][0]:
+        return IG_KEYS[0][1]
+    for (t0, x0), (t1, x1) in zip(IG_KEYS, IG_KEYS[1:]):
+        if t < t1:
+            u = (t - t0) / (t1 - t0)
+            u = 0.5 * u + 0.5 * ease(u)          # gentle settle at each milestone
+            return x0 + (x1 - x0) * u
+    return IG_KEYS[-1][1]
+
+_ch, _cw = IG_CARD_ORIG.shape[:2]
+_xs = (np.arange(_cw) - IG_PAD) / IG_SC        # card column -> image x
+_pill_alpha_mask = []
+for (x0, y0, x1, y1) in chart_plate.PILLS:
+    m = np.zeros((_ch, _cw), np.float32)
+    m[int(y0 * IG_SC) + IG_PAD:int(y1 * IG_SC) + IG_PAD + 1, int(x0 * IG_SC) + IG_PAD:int(x1 * IG_SC) + IG_PAD + 1] = 1
+    m = np.asarray(Image.fromarray((m * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(2))).astype(np.float32) / 255
+    _pill_alpha_mask.append(m)
+_pill_any = np.clip(sum(_pill_alpha_mask), 0, 1)
+_glow_col = srgb_to_hlg(np.array([1.0, 1.0, 1.0], np.float32), white=CARD_WHITE)
+
+def ig_card(t):
+    tip = ig_tip(t)
+    reveal = np.clip((tip - _xs) / 10 + 0.5, 0, 1)[None, :] * np.ones((_ch, 1), np.float32)
+    mask = reveal * (1 - _pill_any)
+    for k, pm in enumerate(_pill_alpha_mask):
+        tk = next(tt for tt, xx in IG_KEYS if xx == chart_plate.DOTS_X[k])
+        mask += pm * ease((t - tk + 0.05) / 0.45)
+    card = IG_CARD_CLEAN.copy()
+    card[..., :3] = IG_CARD_CLEAN[..., :3] * (1 - mask[..., None]) + IG_CARD_ORIG[..., :3] * mask[..., None]
+    # soft glow leading the line while it draws
+    g = 1 - ease((t - IG_KEYS[-1][0]) / 0.5)
+    if g > 0 and t > IG_KEYS[0][0]:
+        cx = tip * IG_SC + IG_PAD
+        cy = ig_curve[int(min(max(tip, 0), len(ig_curve) - 1))] * IG_SC + IG_PAD
+        r = 26
+        y0, y1, x0, x1 = int(cy - r), int(cy + r), int(cx - r), int(cx + r)
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        a = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * 7.0 ** 2)) * 0.85 * g
+        sub = card[y0:y1, x0:x1, :3]
+        sub[:] = sub * (1 - a[..., None]) + _glow_col * a[..., None]
+    return card
+
+def infographic(fr, t):
+    if not (IG_START <= t < IG_END):
+        return None
+    fade_in = ease((t - IG_START) / 0.45)
+    fade_out = ease((IG_END - t) / 0.40)
+    m = fade_in * fade_out
+    bg = soft_blur(fr) * 0.55 + DIM * 0.45
+    base = fr * (1 - m) + bg * m
+    c = ig_card(t)
+    over_clip(base, c, (W - c.shape[1]) / 2, IG_CY - c.shape[0] / 2, m)
     return base
 
 # ---------------------------------------------------------------- logo
@@ -406,6 +483,8 @@ for k, (s0, s1) in enumerate(segs):
             fr = zoom(fr, z)
             t = out_t
             b = broll(fr, t)
+            if b is None:
+                b = infographic(fr, t)
             fr = b if b is not None else fr.copy()
             for n0, n1, layer in cap_events:
                 if n0 <= t < n1:
@@ -414,6 +493,8 @@ for k, (s0, s1) in enumerate(segs):
                     over(fr, layer, 0, CAP_Y + rise, al)
             # logo steps aside while the photo cards are on screen
             hide = ease((t - BROLL_START) / 0.4) * ease((BROLL_END - t) / 0.4) if BROLL_START <= t < BROLL_END else 0
+            if IG_START <= t < IG_END:
+                hide = ease((t - IG_START) / 0.4) * ease((IG_END - t) / 0.4)
             over(fr, logo_small, *LOGO_POS, ease(t / 0.6) * (1 - hide))
             write(fr)
             last = fr
