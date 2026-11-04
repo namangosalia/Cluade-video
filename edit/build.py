@@ -86,8 +86,7 @@ def to_new(t_orig):
     return acc
 
 BODY = sum(s1 - s0 for s0, s1 in segs)
-OUTRO = 0.9          # frozen last frame while fading to black
-FADE_LEN = 1.25      # final fade-out length (starts on live frames)
+OUTRO = 2.8          # grey end card with "Learn More"
 TOTAL = BODY + OUTRO
 print(f"segments: {len(segs)}  body {BODY:.2f}s  total {TOTAL:.2f}s (orig {DUR:.2f}s)")
 
@@ -174,7 +173,7 @@ if not args.no_captions:
             nxt = to_new(CAPTIONS[i + 1][0]) - 0.05
             n1 = nxt if nxt - n1 < 0.45 else n1
         else:
-            n1 = BODY + OUTRO
+            n1 = BODY + 0.25
         cap_events.append((n0, n1, render_caption(text)))
 CAP_Y = 800    # top of caption block: collar / upper-chest area
 
@@ -256,10 +255,12 @@ def over(frame, layer, x, y, alpha=1.0):
     roi[:] = roi * (1 - a) + layer[..., :3] * a
 
 # ---------------------------------------------------------------- video
-# Keep the original lighting: HLG signal kept as-is, only BT.2020 -> BT.709 colour
-# primaries converted (no tone-mapping, grading or vignette).
-vf = ("zscale=tin=bt709:t=bt709:pin=bt2020:p=bt709:min=bt2020nc:m=bt709:rin=tv:r=tv,"
-      "format=yuv420p,hqdn3d=1.5:1.5:4:4,"
+# HLG -> SDR the standard way (HDR reference white 203 nits = SDR white), soft
+# highlight roll-off, then saturation trimmed to keep natural skin tone.
+# No brightness grade and no vignette: original lighting is kept.
+vf = ("zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,"
+      "tonemap=reinhard:param=0.5:desat=0,zscale=t=bt709:m=bt709:r=tv,"
+      "format=yuv420p,eq=saturation=0.85,hqdn3d=1.5:1.5:4:4,"
       "crop=492:874:7:0,scale=1080:1920:flags=lanczos,unsharp=5:5:0.5:5:5:0,format=rgb24")
 dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", SRC, "-vf", vf, "-r", str(FPS),
                         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
@@ -308,16 +309,44 @@ for k, (s0, s1) in enumerate(segs):
                     over(fr, layer, 0, CAP_Y + rise, al)
             over(fr, logo_small, *LOGO_POS, 0.85 * ease(t / 0.6))
             last = fr.copy()
-            fr *= ease((TOTAL - t) / FADE_LEN)
             enc.stdin.write((fr * 255 + 0.5).astype(np.uint8).tobytes())
             out_t += 1 / FPS
         src_i += 1
 
-# outro: hold the last frame (captions + logo included) and finish the fade to black
+# outro: last frame dissolves into a soft grey background, "Learn More" in the centre
+def make_cta(text="LEARN MORE"):
+    f = ImageFont.truetype(FONT_DIR + "Inter-Medium.otf", 40)
+    d = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    track = 6
+    widths = [d.textlength(ch, font=f) for ch in text]
+    tw = sum(widths) + track * (len(text) - 1)
+    pw, ph = int(tw + 2 * 64), 100
+    img = Image.new("RGBA", (pw + 8, ph + 8), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(img)
+    dr.rounded_rectangle((4, 4, 4 + pw, 4 + ph), ph // 2, outline=(255, 255, 255, 210), width=2)
+    x = 4 + (pw - tw) / 2
+    asc, desc = f.getmetrics()
+    y = 4 + (ph - (asc + desc)) / 2 + 2
+    for ch, wd in zip(text, widths):
+        dr.text((x, y), ch, font=f, fill=(255, 255, 255, 255))
+        x += wd + track
+    return np.asarray(img).astype(np.float32) / 255
+
+cta = make_cta()
+GREY = np.array([0.30, 0.30, 0.31], np.float32)
+g = Image.fromarray((last * 255).astype(np.uint8)).resize((W // 8, H // 8), Image.BILINEAR)
+g = g.filter(ImageFilter.GaussianBlur(6)).resize((W, H), Image.BILINEAR)
+g = np.asarray(g).astype(np.float32) / 255
+lum = (g @ np.array([0.299, 0.587, 0.114], np.float32))[..., None]
+grey_bg = GREY * 0.7 + lum * 0.3 * np.ones(3, np.float32)   # grey, keeps a hint of the light
 n_out = round(OUTRO * FPS)
 for i in range(n_out):
-    t = out_t + i / FPS
-    fr = last * ease((TOTAL - t) / FADE_LEN)
+    t = i / FPS
+    m = ease(t / 0.8)
+    fr = last * (1 - m) + grey_bg * m
+    over(fr, logo_small, *LOGO_POS, 0.85 * (1 - m))
+    a = ease((t - 0.7) / 0.6)
+    over(fr, cta, (W - cta.shape[1]) / 2, (H - cta.shape[0]) / 2 + (1 - a) * 6, a)
     enc.stdin.write((np.clip(fr, 0, 1) * 255 + 0.5).astype(np.uint8).tobytes())
 
 enc.stdin.close(); enc.wait(); dec.terminate()
