@@ -19,3 +19,28 @@ CAPTIONS = [
 
 # Pauses (gap start in original timeline) that are allowed to breathe longer.
 DRAMATIC_AFTER = [2.90, 5.96, 7.86, 9.40, 22.30, 37.08, 44.70]
+
+# ---------------------------------------------------------------- trailer-style text (same system as video 2)
+# GROUPS: (word_from, word_to_exclusive, display with [KEY WORDS], position BL/BR/B/T)
+GROUPS = [
+    (1, 8, "Prevention is not a [ONE-TIME SCREENING.]", "BL"),
+    (8, 17, "It's not a full body profile check and [YOU'RE DONE.]", "BR"),
+    (22, 27, "Understanding the exact [CARDIOVASCULAR BIOMARKERS]", "B"),
+    (27, 33, "you need for your [BODY PROFILE,]", "BR"),
+    (33, 36, "knowing [YOUR RISK,]", "B"),
+    (36, 41, "reducing it to [LOW RISK,]", "B"),
+    (41, 47, "maintaining it, tracking it [OVER TIME.]", "B"),
+    (47, 54, "And that's exactly what [ANGINAX] is bringing", "B"),
+    (54, 60, "to your doorstep, [AT YOUR HOME.]", "B"),
+    (60, 70, "In fact, by taking care of your own [HEART HEALTH,]", "BL"),
+    (70, 79, "you can become part of a [MUCH BIGGER CHANGE,]", "BR"),
+    (86, 98, "And that's the conversation Anginax is bringing to [GLOBAL HEALTH.]", "B"),
+    (98, 109, "We don't just want to save lives [IN THE ICU ROOM,]", "BL"),
+]
+# STATEMENTS: full-screen moments over the greyed-out speaker. Cream-gold accent (trust, not alarm).
+STATEMENTS = [
+    (17, 22, [("IT IS LIFELONG.", "white", 17), ("IT'S LONGITUDINAL.", "accent", 20)], "plain"),
+    (79, 86, [("which is", "small", 79), ("DEFAULT-IZING", "accent", 81), ("CARDIOVASCULAR PREVENTION", "white", 82),
+              ("FOR EVERYONE.", "white", 84)], "plain"),
+    (109, 119, [("WE WANT TO SAVE LIVES", "white", 109), ("WHILE YOU'RE AT HOME.", "accent", 114)], "plain"),
+]

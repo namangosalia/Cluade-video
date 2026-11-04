@@ -163,7 +163,7 @@ def build_groups(groups, words, T, body):
 
 
 # ------------------------------------------------------------------ statements
-STYLE = {"num": (CREAM, 300), "white": (WHITE, 150), "red": (RED, 150), "small": (WHITE, 42)}
+STYLE = {"num": (CREAM, 300), "white": (WHITE, 150), "red": (RED, 150), "accent": (CREAM, 150), "small": (WHITE, 42)}
 
 
 def fmt(n):

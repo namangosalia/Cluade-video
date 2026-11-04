@@ -9,8 +9,11 @@ import argparse, json, os, subprocess, wave
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from captions import CAPTIONS, DRAMATIC_AFTER
+from captions import GROUPS, STATEMENTS, DRAMATIC_AFTER
 import chart_plate
+import sys as _sys
+_sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "video2", "edit"))
+import trailer_text as tt   # same typography system as video 2
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "source", "raw.mp4")
@@ -185,84 +188,19 @@ audio = os.path.join(TMP, "audio.m4a")
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", cut, "-af", ln, "-ar", "48000",
                 "-c:a", "aac", "-b:a", "256k", audio], check=True)
 
-# ---------------------------------------------------------------- caption layers
-CAP_SIZE, CAP_LH = 40, 54
-CAP_WHITE = 0.60
-f_cap = ImageFont.truetype(FONT_DIR + "Inter-Medium.otf", CAP_SIZE)
+# ---------------------------------------------------------------- trailer typography (as video 2)
+cap_groups = tt.build_groups(GROUPS, words, to_new, BODY)
+statements = tt.build_statements(STATEMENTS, words, to_new)
+for st in statements:
+    print(f"statement {st.t0:6.2f}-{st.t1:6.2f}s")
 
-def render_caption(text):
-    tokens, hl = [], False
-    for raw in text.split(" "):
-        word = raw
-        if word.startswith("["):
-            hl, word = True, word[1:]
-        end_hl = word.endswith("]") or word.endswith("],") or word.endswith("].")
-        word = word.replace("]", "")
-        tokens.append((word, hl))
-        if end_hl:
-            hl = False
-    d = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    sp = d.textlength(" ", font=f_cap)
-    maxw = 1000
-    tw = lambda l: d.textlength(" ".join(x for x, _ in l), font=f_cap)
-    if tw(tokens) <= maxw:
-        lines = [tokens]
-    else:
-        # two balanced lines; small bonus for breaking right before a highlight
-        best = None
-        for i in range(1, len(tokens)):
-            l0, l1 = tokens[:i], tokens[i:]
-            if tw(l0) > maxw or tw(l1) > maxw:
-                continue
-            score = max(tw(l0), tw(l1)) - (40 if tokens[i][1] and not tokens[i - 1][1] else 0) \
-                + (400 if tokens[i][1] and tokens[i - 1][1] else 0)   # never split a highlight
-            if best is None or score < best[0]:
-                best = (score, [l0, l1])
-        lines = best[1]
-    LH = CAP_LH
-    img = Image.new("RGBA", (W, LH * len(lines) + 30), (0, 0, 0, 0))
-    shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    ds, dt = ImageDraw.Draw(shadow), ImageDraw.Draw(img)
-    layout = []
-    for li, line in enumerate(lines):
-        x = (W - d.textlength(" ".join(x for x, _ in line), font=f_cap)) / 2
-        y = 10 + li * LH
-        for j, (word, h) in enumerate(line):
-            wl = d.textlength(word, font=f_cap)
-            # underline joins across consecutive highlighted words
-            ul_end = x + wl + (sp if j + 1 < len(line) and line[j + 1][1] and h else 0)
-            layout.append((x, y, word, h, ul_end))
-            x += wl + sp
-    for x, y, word, h, _ in layout:
-        ds.text((x, y + 2), word, font=f_cap, fill=(0, 0, 0, 255))
-    # wide soft shadow + tight shadow so white text reads on the white shirt
-    wide = shadow.filter(ImageFilter.GaussianBlur(12))
-    wide.putalpha(wide.getchannel("A").point(lambda v: min(255, int(v * 1.5))))
-    img.alpha_composite(wide)
-    tight = shadow.filter(ImageFilter.GaussianBlur(3))
-    tight.putalpha(tight.getchannel("A").point(lambda v: int(v * 0.55)))
-    img.alpha_composite(tight)
-    for x, y, word, h, ul_end in layout:
-        dt.text((x, y), word, font=f_cap, fill=GOLD + (255,) if h else (255, 255, 255, 255))
-        if h:
-            dt.line((x, y + 50, ul_end, y + 50), fill=GOLD + (190,), width=2)
-    # captions sit on the white shirt (HLG ~0.80-0.89), so their white is lifted to
-    # ~0.92 HLG signal (~600 nits) to read as clean white, not grey
-    return layer_to_hlg(np.asarray(img).astype(np.float32) / 255, white=CAP_WHITE)
-
-cap_events = []
-if not args.no_captions:
-    for i, (t0, t1, text) in enumerate(CAPTIONS):
-        n0 = to_new(t0) - 0.05
-        n1 = to_new(t1) + 0.25
-        if i + 1 < len(CAPTIONS):
-            nxt = to_new(CAPTIONS[i + 1][0]) - 0.05
-            n1 = nxt if nxt - n1 < 0.45 else n1
-        else:
-            n1 = BODY + 0.25
-        cap_events.append((n0, n1, render_caption(text)))
-CAP_Y = 880    # top of caption block: lower neck / collar line
-
+def gray_amount(t):
+    g = 0.0
+    for st in statements:
+        a_, b_ = st.t0 - 0.25, st.t1
+        if a_ <= t < b_ + 0.5:
+            g = max(g, ease((t - a_) / 0.5) * (1 - ease((t - b_) / 0.5)))
+    return g
 
 # ---------------------------------------------------------------- b-roll cards
 # Slow "swipe" of two proof images over: "And that's the conversation Anginax
@@ -490,7 +428,7 @@ enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_f
                         "-c:a", "copy", "-movflags", "+faststart", "-shortest", args.out],
                        stdin=subprocess.PIPE)
 
-ZOOMS = [1.0, 1.075]
+FRAMES = [(1.00, 1.05), (1.20, 1.15), (1.08, 1.13), (1.26, 1.20), (1.04, 1.00), (1.14, 1.20)]
 FOCUS_Y = 0.30   # keep the face in place when punching in
 
 def zoom(fr, z):
@@ -507,7 +445,7 @@ def write(fr):
 frame_size = W * H * 3 * 2
 src_i, out_t, last = 0, 0.0, None
 for k, (s0, s1) in enumerate(segs):
-    z = ZOOMS[k % 2]
+    z0, z1 = FRAMES[k % len(FRAMES)]
     f0, f1 = round(s0 * FPS), round(s1 * FPS)
     while src_i < f1:
         buf = dec.stdout.read(frame_size)
@@ -515,17 +453,24 @@ for k, (s0, s1) in enumerate(segs):
             break
         if src_i >= f0:
             fr = np.frombuffer(buf, "<u2").reshape(H, W, 3).astype(np.float32) / 65535
-            fr = zoom(fr, z)
+            fr = zoom(fr, z0 + (z1 - z0) * ease((src_i - f0) / max(f1 - f0, 1)))
             t = out_t
             b = broll(fr, t)
             if b is None:
                 b = infographic(fr, t)
             fr = b if b is not None else fr.copy()
-            for n0, n1, layer in cap_events:
-                if n0 <= t < n1:
-                    al = ease((t - n0) / 0.22) * ease((n1 - t) / 0.15)
-                    rise = (1 - ease((t - n0) / 0.30)) * 5
-                    over(fr, layer, 0, CAP_Y + rise, al)
+            g = gray_amount(t)
+            if g > 0:
+                Y = (fr @ np.array([0.2627, 0.6780, 0.0593], np.float32))[..., None]
+                fr = (fr * (1 - 0.90 * g) + Y * 0.90 * g) * (1 - 0.50 * g)
+            for st in statements:
+                lay = st.render(t)
+                if lay:
+                    over_clip(fr, lay[0], lay[1], lay[2])
+            for grp in (cap_groups if g < 0.25 else ()):     # captions give way to statements
+                lay = grp.render(t)
+                if lay:
+                    over_clip(fr, lay[0], lay[1], lay[2])
             # logo steps aside while the photo cards are on screen
             hide = ease((t - BROLL_START) / 0.4) * ease((BROLL_END - t) / 0.4) if BROLL_START <= t < BROLL_END else 0
             if IG_START <= t < IG_END:
