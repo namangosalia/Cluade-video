@@ -70,6 +70,15 @@ def over(frame, layer, x, y, alpha=1.0):
     roi[:] = roi * (1 - a) + l[..., :3] * a
 
 # ---------------------------------------------------------------- audio analysis + cuts
+# Part 1 + the continuation ("This is neither practical nor convenient... Then what do we do?")
+SRC1, SRC2 = SRC, os.path.join(ROOT, "source", "raw_part2.mp4")
+lst = os.path.join(TMP, "concat.txt")
+open(lst, "w").write(f"file '{SRC1}'\nfile '{SRC2}'\n")
+SRC = os.path.join(TMP, "combined.mp4")
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", SRC], check=True)
+OFFSET = float(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration",
+                               "-of", "csv=p=0", SRC1], capture_output=True, text=True).stdout.strip())
+
 wav = os.path.join(TMP, "a.wav")
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SRC, "-ac", "1", "-ar", "16000", wav], check=True)
 w = wave.open(wav)
@@ -77,6 +86,7 @@ a16 = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) /
 rms = np.array([20 * np.log10(np.sqrt(np.mean(a16[i:i + 400] ** 2)) + 1e-9) for i in range(0, len(a16), 160)])
 DUR = len(a16) / 16000
 words = json.load(open(os.path.join(HERE, "words.json")))
+words += [[s_ + OFFSET, e_ + OFFSET, t_] for s_, e_, t_ in json.load(open(os.path.join(HERE, "words_part2.json")))]
 
 # every quiet stretch (< -30 dB, >= 0.30 s), wherever it falls (also inside long word spans)
 runs, s = [], None
@@ -88,12 +98,14 @@ for i, q in enumerate(rms < -30.0):
             runs.append((s / 100, i / 100))
         s = None
 
-START, END = 0.62, min(DUR, 63.72)
+START, END = 0.62, min(DUR, OFFSET + 5.88 + 0.45)
 cuts = []
 for q0, q1 in runs:
     if q0 < START or q1 > END:
         continue
     keep = 0.62 if any(abs(q0 - d) < 0.08 for d in DRAMATIC_AFTER) else 0.30
+    if q0 < OFFSET < q1:
+        keep = 0.70                                     # breath before the continuation
     c0, c1 = q0 + keep * 0.55, q1 - keep * 0.45
     if c1 - c0 > 0.08:
         cuts.append((c0, c1))
@@ -166,7 +178,7 @@ def rel(o, start):
 # Naman stays on screen for almost the whole video. One cutaway sequence (flow.py)
 # shows a person going through the effort of prevention, shot by shot, on his words.
 SCENES = []
-_shots = [(37.10, flow.Phone), (38.58, flow.Hospital), (40.22, flow.Blood), (42.04, flow.Lobby), (43.32, flow.Bill)]
+_shots = [(37.10, flow.Phone), (38.58, flow.Hospital), (40.22, flow.Queue), (42.04, flow.BusyLobby), (43.32, flow.Payment)]
 _end = to_new(45.66) - 0.10
 for i, (o, cls) in enumerate(_shots):
     a_ = to_new(o) - 0.30
@@ -215,6 +227,7 @@ FOCUS_Y = 0.30
 # (start, end) zoom per cut: wide, push-in close, medium pull-out, tight
 FRAMES = [(1.00, 1.05), (1.20, 1.15), (1.08, 1.13), (1.26, 1.20), (1.04, 1.00), (1.14, 1.20)]
 PUSH_FROM = to_new(52.79)          # slow push-in through the closing question
+PUSH_TO = to_new(63.26) + 0.3
 
 def zoom(fr, z):
     if z <= 1.0005:
@@ -237,8 +250,8 @@ for k, (s0, s1) in enumerate(segs):
         if src_i >= f0:
             t = out_t
             fr = np.frombuffer(buf, "<u2").reshape(H, W, 3).astype(np.float32) / 65535
-            if t >= PUSH_FROM:
-                z = 1.04 + 0.14 * ease((t - PUSH_FROM) / (BODY - PUSH_FROM))
+            if PUSH_FROM <= t < PUSH_TO:
+                z = 1.04 + 0.14 * ease((t - PUSH_FROM) / (PUSH_TO - PUSH_FROM))
             else:
                 z0, z1 = FRAMES[k % len(FRAMES)]
                 z = z0 + (z1 - z0) * ease((src_i - f0) / max(f1 - f0, 1))

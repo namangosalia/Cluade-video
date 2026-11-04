@@ -313,3 +313,191 @@ class Bill:
         ImageDraw.Draw(lamp).ellipse((150, 900, 950, 1800), fill=(255, 210, 160, 35))
         glow(img, lamp, 90)
         return to_hlg(push(img, t, self.dur, 0.06, fy=0.7))
+
+
+# ============================================================ the man, and other patients
+MAN = (14, 16, 22, 255)          # his dark navy jacket
+CROWD = (20, 21, 24, 255)
+
+
+def figure(img, x, y, s, col=CROWD, pose="stand", rim=None, flip=False):
+    """Rim-lit silhouette. pose: stand, sit, sit_slump, cane, child, sling, head_in_hands."""
+    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    hw, head = s * 0.13, s * 0.075
+    bend = 0.0
+    if pose == "cane":
+        bend = s * 0.06
+    if pose in ("sit", "sit_slump", "head_in_hands"):
+        hy = y - s * 0.78 + (s * 0.05 if pose != "sit" else 0)
+        hx = x + (s * 0.04 if pose != "sit" else 0)
+        d.ellipse((hx - head, hy, hx + head, hy + 2 * head), fill=col)
+        d.rounded_rectangle((x - hw, hy + 2 * head, x + hw, y - s * 0.36), radius=hw * 0.6, fill=col)
+        d.rounded_rectangle((x - hw, y - s * 0.44, x + hw * 2.0, y - s * 0.32), radius=s * 0.04, fill=col)
+        d.rectangle((x + hw * 1.5, y - s * 0.36, x + hw * 2.0, y), fill=col)
+        if pose == "head_in_hands":
+            d.polygon([(x + hw * 0.4, y - s * 0.55), (x + hw * 1.2, y - s * 0.40), (hx + head, hy + head * 1.6)], fill=col)
+    elif pose == "child":
+        s2 = s * 0.55
+        d.ellipse((x - s2 * 0.09, y - s2, x + s2 * 0.09, y - s2 + s2 * 0.18), fill=col)
+        d.rounded_rectangle((x - s2 * 0.13, y - s2 * 0.82, x + s2 * 0.13, y - s2 * 0.40), radius=8, fill=col)
+        d.rectangle((x - s2 * 0.10, y - s2 * 0.42, x + s2 * 0.10, y), fill=col)
+    else:
+        d.ellipse((x - head + bend, y - s, x + head + bend, y - s + 2 * head), fill=col)
+        d.rounded_rectangle((x - hw + bend * 0.6, y - s + 2 * head + s * 0.01, x + hw + bend * 0.6, y - s * 0.42),
+                            radius=hw * 0.6, fill=col)
+        for side in (-1, 1):
+            lx = x + side * hw * 0.45
+            d.polygon([(lx - hw * 0.38, y - s * 0.43), (lx + hw * 0.38, y - s * 0.43),
+                       (lx + hw * 0.30, y), (lx - hw * 0.30, y)], fill=col)
+        if pose == "cane":
+            d.line((x + hw * 1.3, y - s * 0.50, x + hw * 1.6, y), fill=col, width=max(3, int(s * 0.012)))
+        if pose == "sling":
+            d.rounded_rectangle((x - hw * 0.2, y - s * 0.66, x + hw * 1.1, y - s * 0.56), radius=6, fill=(70, 74, 80, 255))
+    if flip:
+        lay = lay.transpose(Image.FLIP_LEFT_RIGHT)
+    if rim:
+        a = lay.getchannel("A")
+        edge = Image.new("RGBA", (W, H), rim + (0,))
+        shifted = Image.new("L", (W, H), 0)
+        shifted.paste(a, (-3, -2))
+        e = Image.eval(Image.composite(a, Image.new("L", (W, H), 0), a), lambda v: v)
+        rim_a = Image.eval(a, lambda v: v).filter(ImageFilter.MaxFilter(3))
+        rim_a = Image.composite(Image.new("L", (W, H), 0), rim_a, shifted.point(lambda v: 255 if v > 128 else 0))
+        edge.putalpha(rim_a.filter(ImageFilter.GaussianBlur(1.5)).point(lambda v: int(v * 0.85)))
+        img.alpha_composite(lay)
+        img.alpha_composite(edge)
+    else:
+        img.alpha_composite(lay)
+
+
+# ============================================================ 3b. the long queue for blood tests
+class Queue:
+    def __init__(self, dur):
+        self.dur = dur
+        bg = vgrad((44, 50, 52), (30, 33, 35)).convert("RGBA")
+        d = ImageDraw.Draw(bg)
+        d.rectangle((0, 1420, W, H), fill=(26, 28, 30, 255))
+        # counter window at the end of the line, with its lit sign
+        win = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        wd = ImageDraw.Draw(win)
+        wd.rectangle((560, 640, 960, 1000), fill=(210, 232, 236, 200))
+        bg.alpha_composite(win); glow(bg, win, 60, 1.1)
+        sign = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(sign)
+        sd.rounded_rectangle((540, 470, 980, 590), 10, fill=(18, 60, 70, 255))
+        sd.text((760, 512), "SAMPLE COLLECTION", font=font("Inter-SemiBold.otf", 32), fill=(225, 245, 245, 255), anchor="mm")
+        sd.text((760, 556), "BLOOD TESTS", font=font("Inter-Medium.otf", 22), fill=(170, 215, 220, 255), anchor="mm")
+        bg.alpha_composite(sign); glow(bg, sign, 18, 0.6)
+        fl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(fl).rectangle((80, 0, 1000, 36), fill=(225, 240, 238, 255))
+        bg.alpha_composite(fl); glow(bg, fl, 70, 1.2)
+        self.bg = bg
+
+    def __call__(self, t):
+        img = self.bg.copy()
+        # a long line receding toward the counter; the man waits at the back, nearest us
+        shuffle = 6 * ease(t / self.dur)
+        poses = ["stand", "cane", "stand", "sling", "stand", "stand", "stand"]
+        for i in range(7):
+            k = i / 6
+            x = 690 - 520 * (1 - k) ** 1.2 + (shuffle if i < 6 else 0)
+            y = 1060 + 560 * (1 - k) ** 1.6
+            s = 300 + 640 * (1 - k) ** 1.9
+            if i == 0:
+                continue
+            figure(img, x, y, s, CROWD, poses[i], rim=(140, 170, 175))
+        figure(img, 210 + shuffle * 2, 1880, 1040, MAN, "stand", rim=(170, 200, 205))
+        return to_hlg(push(img, t, self.dur, 0.05, fy=0.45, dx=10))
+
+
+# ============================================================ 4b. the busy waiting lobby
+class BusyLobby(Lobby):
+    def __call__(self, t):
+        img = self.bg.copy()
+        img.alpha_composite(self.board)
+        d = ImageDraw.Draw(img)
+        token = 41 + int(t / 1.2)
+        d.text((255, 270), "NOW SERVING", font=font("Inter-SemiBold.otf", 20), fill=(220, 90, 70, 255), anchor="mm")
+        d.text((255, 330), f"A-{token}", font=font("InterDisplay-Medium.otf", 54), fill=(240, 120, 90, 255), anchor="mm")
+        cx, cy, r = 800, 430, 105
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(225, 228, 226, 255), outline=(60, 64, 66, 255), width=8)
+        am = (t * 0.9) * 2 * math.pi
+        ah = (2.3 + t * 0.075) * 2 * math.pi / 12
+        d.line((cx, cy, cx + math.sin(ah) * r * 0.5, cy - math.cos(ah) * r * 0.5), fill=(30, 30, 32, 255), width=9)
+        d.line((cx, cy, cx + math.sin(am) * r * 0.78, cy - math.cos(am) * r * 0.78), fill=(30, 30, 32, 255), width=6)
+        rim = (150, 175, 180)
+        # back row (smaller, further), standing patients, front row with the man
+        for i, pose in enumerate(["sit_slump", "sit", "head_in_hands", "sit", "sit_slump", "sit"]):
+            figure(img, 110 + i * 175, 1130, 380, CROWD, pose, rim=rim, flip=(i % 2 == 1))
+        figure(img, 960, 1250, 560, CROWD, "cane", rim=rim)
+        figure(img, 80, 1260, 540, CROWD, "sling", rim=rim)
+        figure(img, 170, 1260, 540, CROWD, "child", rim=rim)
+        for i, pose in enumerate(["sit", "head_in_hands", None, "sit_slump"]):
+            x = 230 + i * 210
+            if pose is None:
+                continue
+            figure(img, x, 1560, 640, CROWD, pose, rim=rim, flip=(i == 3))
+        figure(img, 650, 1600, 700, MAN, "sit_slump", rim=(175, 200, 205))
+        ph = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(ph).ellipse((680, 1100, 760, 1150), fill=(150, 175, 230, 120))
+        glow(img, ph, 22)
+        return to_hlg(push(img, t, self.dur, 0.05, fy=0.6, dx=-20))
+
+
+# ============================================================ 5b. paying thousands of rupees
+class Payment(Bill):
+    LINES = [("Consultation", 1500), ("Complete blood count", 900), ("Lipid profile", 1800),
+             ("HbA1c", 1100), ("ECG", 1200), ("Imaging", 4500)]
+
+    def __call__(self, t):
+        img = self.bg.copy()
+        # billing counter glass and cashier behind it
+        counter = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        cd = ImageDraw.Draw(counter)
+        cd.rectangle((0, 160, W, 900), fill=(60, 66, 70, 255))
+        cd.rectangle((0, 900, W, 960), fill=(36, 34, 32, 255))
+        cd.text((540, 230), "BILLING", font=font("Inter-SemiBold.otf", 40), fill=(225, 230, 232, 255), anchor="mm")
+        img.alpha_composite(counter)
+        figure(img, 540, 1010, 760, (30, 33, 36, 255), "stand")
+        glass = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(glass).rectangle((0, 300, W, 900), fill=(190, 215, 220, 40))
+        img.alpha_composite(glass)
+        x0, y0, x1, y1 = 200, 1010, 880, 1760
+        sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(sh).rectangle((x0 + 14, y0 + 20, x1 + 14, y1 + 20), fill=(0, 0, 0, 150))
+        img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(22)))
+        d = ImageDraw.Draw(img)
+        d.rectangle((x0, y0, x1, y1), fill=(232, 228, 218, 255))
+        d.text((x0 + 50, y0 + 46), "HOSPITAL INVOICE", font=font("Inter-SemiBold.otf", 30), fill=(40, 40, 44, 255))
+        d.line((x0 + 50, y0 + 100, x1 - 50, y0 + 100), fill=(160, 156, 148, 255), width=2)
+        total = 0
+        f = font("Inter-Medium.otf", 26)
+        per = max((self.dur - 1.2) / len(self.LINES), 0.2)
+        for i, (name, amt) in enumerate(self.LINES):
+            a = ease((t - 0.1 - i * per) / 0.35)
+            if a <= 0:
+                continue
+            y = y0 + 130 + i * 62
+            col = (50, 50, 56, int(255 * a))
+            d.text((x0 + 50, y), name, font=f, fill=col)
+            s = f"₹ {amt:,}"
+            d.text((x1 - 50 - d.textlength(s, font=f), y), s, font=f, fill=col)
+            total += amt * a
+        d.line((x0 + 50, y1 - 150, x1 - 50, y1 - 150), fill=(160, 156, 148, 255), width=2)
+        d.text((x0 + 50, y1 - 118), "TOTAL", font=font("Inter-SemiBold.otf", 30), fill=(40, 40, 44, 255))
+        s = f"₹ {int(round(total)):,}"
+        ft = font("InterDisplay-SemiBold.otf", 56)
+        d.text((x1 - 50 - d.textlength(s, font=ft), y1 - 132), s, font=ft, fill=(140, 30, 30, 255))
+        # his hand with a card, entering from the right
+        u = ease((t - 0.6) / 0.8)
+        hand = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        hd = ImageDraw.Draw(hand)
+        hx = W + 40 - 360 * u
+        hd.rounded_rectangle((hx - 40, 1500, hx + 400, 1640), 50, fill=MAN)
+        hd.rounded_rectangle((hx - 150, 1470, hx + 30, 1580), 12, fill=(196, 160, 70, 255))
+        img.alpha_composite(hand)
+        lamp = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(lamp).ellipse((150, 900, 950, 1800), fill=(255, 210, 160, 30))
+        glow(img, lamp, 90)
+        return to_hlg(push(img, t, self.dur, 0.05, fy=0.7))

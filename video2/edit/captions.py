@@ -25,6 +25,9 @@ GROUPS = [
     (118, 123, "So why would someone [SPEND]", "BR"),
     (123, 126, "[TIME, MONEY, ENERGY,]", "B"),
     (126, 129, "face the [UNCERTAINTIES]", "BL"),
+    # continuation (part 2 words start at index 133)
+    (133, 139, "This is neither [PRACTICAL] nor [CONVENIENT,]", "BL"),
+    (139, 143, "and I [UNDERSTAND] that.", "BR"),
 ]
 
 STATEMENTS = [
@@ -33,6 +36,7 @@ STATEMENTS = [
     (65, 70, [("WHY CAN'T WE", "white", 65), ("PREVENT THAT?", "red", 68)], "plain"),
     (114, 118, [("NO PAIN.", "white", 114), ("NO SYMPTOMS.", "red", 116)], "plain"),
     (129, 133, [("WHEN NOTHING", "white", 129), ("FEELS WRONG?", "red", 131)], "plain"),
+    (143, 148, [("THEN WHAT", "white", 143), ("DO WE DO?", "red", 145)], "plain"),
 ]
 
 # Quiet runs (start time, original timeline) after which the pause stays longer.
