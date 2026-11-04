@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from captions import CAPTIONS, DRAMATIC_AFTER
 import cine
+import flow
 
 ROOT = os.path.dirname(HERE)
 REPO = os.path.dirname(ROOT)
@@ -91,7 +92,7 @@ cuts = []
 for q0, q1 in runs:
     if q0 < START or q1 > END:
         continue
-    keep = 0.55 if any(abs(q0 - d) < 0.08 for d in DRAMATIC_AFTER) else 0.26
+    keep = 0.75 if any(abs(q0 - d) < 0.08 for d in DRAMATIC_AFTER) else 0.34
     c0, c1 = q0 + keep * 0.55, q1 - keep * 0.45
     if c1 - c0 > 0.08:
         cuts.append((c0, c1))
@@ -230,21 +231,71 @@ def window(o0, o1, lead=0.15, tail=0.12):
 def rel(o, start):
     return to_new(o) - start
 
-# Original cinematic CGI cutaways (cine.py). Voice continues underneath.
+# Naman stays on screen for almost the whole video. One cutaway sequence (flow.py)
+# shows a person going through the effort of prevention, shot by shot, on his words.
 SCENES = []
-a_, b_ = 0.0, to_new(8.68) - 0.12                                       # opening: lives in the dark
-SCENES.append((a_, b_, cine.Lives(rel(1.34, a_), rel(5.30, a_), rel(7.14, a_), b_ - a_)))
-a_, b_ = to_new(11.02) - 0.20, to_new(16.26) + 0.20                     # ICU monitor, 59,000 today
-SCENES.append((a_, b_, cine.Monitor(rel(11.02, a_), rel(14.30, a_), b_ - a_)))
-a_, b_ = to_new(16.26) - 0.15, to_new(23.04) - 0.12                     # days passing, window light
-SCENES.append((a_, b_, cine.Days([rel(o, a_) for o in (17.50, 19.24, 20.74)], rel(21.40, a_), b_ - a_)))
-a_, b_ = to_new(37.10) - 0.20, to_new(45.66) - 0.12                     # hospital: ceiling lights overhead
-SCENES.append((a_, b_, cine.Ceiling(b_ - a_)))
-a_, b_ = to_new(51.54) - 0.20, to_new(52.79) + 0.10                     # no pain, no symptoms: calm heart
-SCENES.append((a_, b_, cine.Monitor(0, 0, b_ - a_, number=False, beat=1.15, calm=True)))
+_shots = [(37.10, flow.Phone), (38.58, flow.Hospital), (40.22, flow.Blood), (42.04, flow.Lobby), (43.32, flow.Bill)]
+_end = to_new(45.66) - 0.10
+for i, (o, cls) in enumerate(_shots):
+    a_ = to_new(o) - 0.30
+    b_ = (to_new(_shots[i + 1][0]) - 0.30 + 0.45) if i + 1 < len(_shots) else _end
+    SCENES.append((a_, b_, cls(b_ - a_)))
 for a_, b_, fn in SCENES:
-    print(f"scene {type(fn).__name__:10s} {a_:6.2f}-{b_:6.2f}s")
-DISSOLVE = 0.35
+    print(f"shot  {type(fn).__name__:10s} {a_:6.2f}-{b_:6.2f}s")
+
+# Number moments: Naman's shot slowly greys out and dims while the number
+# animates in underneath the caption; colour returns when the moment ends.
+T = to_new
+GRAY = [(T(1.34) - 0.5, T(8.68) - 0.6), (T(11.02) - 0.6, T(23.04) - 0.2)]
+GRAY_IN, GRAY_OUT = 1.0, 0.9
+NUM_CY, LAB_CY = 1250, 1400
+
+def gray_amount(t):
+    g = 0.0
+    for a_, b_ in GRAY:
+        if a_ <= t < b_ + GRAY_OUT:
+            g = max(g, ease((t - a_) / GRAY_IN) * (1 - ease((t - b_) / GRAY_OUT)))
+    return g
+
+def ease_out(x):
+    x = min(max(x, 0.0), 1.0)
+    return 1 - (1 - x) ** 3
+
+def number_lines(t, g):
+    big = cine.font("InterDisplay-Light.otf", 200)
+    lab = cine.font("Inter-Medium.otf", 32)
+    L = []
+    def label(text, t_in, t_out=None):
+        a = ease((t - t_in) / 0.7)
+        if t_out is not None:
+            a *= 1 - ease((t - t_out) / 0.5)
+        if a > 0:
+            L.append((text, lab, cine.WARM_WHITE, a * 0.92 * g, LAB_CY, 12))
+    if t < T(9.5):
+        a_m = ease((t - T(1.34)) / 1.0) * (1 - ease((t - T(5.30) + 0.5) / 0.6))
+        if a_m > 0:
+            L.append(("MILLIONS", cine.font("InterDisplay-Light.otf", 150), cine.GOLD, a_m * g, NUM_CY, 22))
+        a_8 = ease((t - T(5.30) + 0.1) / 0.8)
+        if a_8 > 0:
+            n = int(round(ease_out((t - T(5.30) + 0.1) / 2.2) * 80))
+            L.append((f"{n}%", big, cine.GOLD, a_8 * g, NUM_CY, 8))
+        label("PREVENTABLE", T(7.14))
+    elif t >= T(10.0):
+        a_n = ease((t - T(11.02) + 0.1) / 0.8)
+        if a_n > 0:
+            t_tot = T(20.9)
+            if t < t_tot:
+                n = ease_out((t - T(11.02) + 0.1) / 2.6) * 59000
+            else:
+                n = 59000 + (236000 - 59000) * ease_out((t - t_tot) / 1.4)
+            L.append((f"{int(round(n)):,}", big, cine.GOLD, a_n * g, NUM_CY, 6))
+        days = [("TODAY", T(14.30)), ("TOMORROW", T(17.50)), ("THE DAY AFTER", T(19.24)),
+                ("AND THE DAY AFTER THAT", T(20.74)), ("IN JUST FOUR DAYS", T(21.30))]
+        for k, (text, ti) in enumerate(days):
+            label(text, ti, days[k + 1][1] - 0.35 if k + 1 < len(days) else None)
+    return L
+
+DISSOLVE = 0.45
 
 # ---------------------------------------------------------------- logo
 logo = Image.open(LOGO)
@@ -308,11 +359,18 @@ for k, (s0, s1) in enumerate(segs):
                 mix = min(tot, 1.0)
                 g = sum(wg * f_ for wg, f_ in act) / tot
                 fr = fr * (1 - mix) + g * mix
-            if t < 0.6:
-                fr = fr * ease(t / 0.6)                                 # open from black
+            g = gray_amount(t)
+            if g > 0:
+                Y = (fr @ np.array([0.2627, 0.6780, 0.0593], np.float32))[..., None]
+                fr = (fr * (1 - 0.88 * g) + Y * 0.88 * g) * (1 - 0.42 * g)
+                lines = number_lines(t, g)
+                if lines:
+                    lay = cine.tracked_layer(lines)
+                    if lay:
+                        over(fr, *lay)
             for n0, n1, layer in cap_events:
                 if n0 <= t < n1:
-                    al = ease((t - n0) / 0.22) * ease((n1 - t) / 0.15)
+                    al = ease((t - n0) / 0.35) * ease((n1 - t) / 0.25)
                     rise = (1 - ease((t - n0) / 0.30)) * 5
                     over(fr, layer, 0, CAP_Y + rise, al)
             over(fr, logo_small, *LOGO_POS, ease(t / 0.6))
