@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from captions import CAPTIONS, DRAMATIC_AFTER
-import scenes as sc
+import cine
 
 ROOT = os.path.dirname(HERE)
 REPO = os.path.dirname(ROOT)
@@ -230,42 +230,21 @@ def window(o0, o1, lead=0.15, tail=0.12):
 def rel(o, start):
     return to_new(o) - start
 
+# Original cinematic CGI cutaways (cine.py). Voice continues underneath.
 SCENES = []
-s0, s1 = window(5.30, 8.68)
-SCENES.append((s0, s1, sc.Preventable(t_num=rel(5.30, s0))))
-s0, s1 = window(11.02, 23.04)
-SCENES.append((s0, s1, sc.DailyToll(rel(11.02, s0), rel(14.30, s0), rel(16.26, s0) - 0.1,
-                                      rel(16.84, s0), rel(18.88, s0), rel(20.54, s0))))
-s0, s1 = window(37.10, 45.66)
-SCENES.append((s0, s1, sc.Hassles([rel(o, s0) for o in (37.10, 38.58, 40.22, 42.04, 43.32)])))
-s0, _ = window(51.54, 52.78)
-s1 = to_new(52.79) + 0.10
-SCENES.append((s0, s1, sc.Calm(rel(51.54, s0), rel(52.30, s0))))
+a_, b_ = 0.0, to_new(8.68) - 0.12                                       # opening: lives in the dark
+SCENES.append((a_, b_, cine.Lives(rel(1.34, a_), rel(5.30, a_), rel(7.14, a_), b_ - a_)))
+a_, b_ = to_new(11.02) - 0.20, to_new(16.26) + 0.20                     # ICU monitor, 59,000 today
+SCENES.append((a_, b_, cine.Monitor(rel(11.02, a_), rel(14.30, a_), b_ - a_)))
+a_, b_ = to_new(16.26) - 0.15, to_new(23.04) - 0.12                     # days passing, window light
+SCENES.append((a_, b_, cine.Days([rel(o, a_) for o in (17.50, 19.24, 20.74)], rel(21.40, a_), b_ - a_)))
+a_, b_ = to_new(37.10) - 0.20, to_new(45.66) - 0.12                     # hospital: ceiling lights overhead
+SCENES.append((a_, b_, cine.Ceiling(b_ - a_)))
+a_, b_ = to_new(51.54) - 0.20, to_new(52.79) + 0.10                     # no pain, no symptoms: calm heart
+SCENES.append((a_, b_, cine.Monitor(0, 0, b_ - a_, number=False, beat=1.15, calm=True)))
 for a_, b_, fn in SCENES:
-    print(f"scene {type(fn).__name__:12s} {a_:6.2f}-{b_:6.2f}s")
-DISSOLVE = 0.22
-GFX_WHITE = 0.60
-
-def overlay_to_hlg(pil):
-    bb = pil.getbbox()
-    if not bb:
-        return None, 0, 0
-    reg = np.asarray(pil.crop(bb)).astype(np.float32) / 255
-    return layer_to_hlg(reg, white=GFX_WHITE), bb[0], bb[1]
-
-PLATE = None
-
-def make_plate(fr):
-    """Backdrop for the graphics: the speaker's own curtain, blurred into soft light."""
-    # only pure curtain: the left and right edges above shoulder height (no head / body)
-    left, right = fr[0:680, 0:190], fr[0:680, 890:1080]
-    halves = [resize_f(left, (W // 2, H), resample=Image.BILINEAR),
-              resize_f(right, (W // 2, H), resample=Image.BILINEAR)[:, ::-1]]   # mirror for symmetry
-    plate = np.concatenate([halves[0], halves[1][:, ::-1]], axis=1)
-    # soft vertical bands of light: keep some horizontal detail, smooth vertically
-    small = resize_f(plate, (54, 10), resample=Image.BOX)
-    plate = resize_f(small, (W, H), resample=Image.BICUBIC)
-    return plate * 0.96
+    print(f"scene {type(fn).__name__:10s} {a_:6.2f}-{b_:6.2f}s")
+DISSOLVE = 0.35
 
 # ---------------------------------------------------------------- logo
 logo = Image.open(LOGO)
@@ -316,19 +295,21 @@ for k, (s0, s1) in enumerate(segs):
         if src_i >= f0:
             t = out_t
             fr = np.frombuffer(buf, "<u2").reshape(H, W, 3).astype(np.float32) / 65535
-            if PLATE is None:
-                PLATE = make_plate(fr)
             z = 1.0 + 0.10 * ease((t - PUSH_FROM) / (BODY - PUSH_FROM)) if t >= PUSH_FROM else (1.0, 1.075)[k % 2]
             fr = zoom(fr, z)
+            # cross-dissolve: speaker <-> cutaways (and cutaway <-> cutaway where they overlap)
+            act = []
             for a_, b_, fn in SCENES:
                 if a_ <= t < b_:
-                    mix = ease((t - a_) / DISSOLVE) * ease((b_ - t) / DISSOLVE)
-                    g = PLATE.copy()
-                    layer, ox, oy = overlay_to_hlg(fn(t - a_))
-                    if layer is not None:
-                        over(g, layer, ox, oy)
-                    fr = fr * (1 - mix) + g * mix
-                    break
+                    wgt = (1.0 if a_ <= 0 else ease((t - a_) / DISSOLVE)) * ease((b_ - t) / DISSOLVE)
+                    act.append((wgt, fn(t - a_)))
+            if act:
+                tot = sum(wg for wg, _ in act)
+                mix = min(tot, 1.0)
+                g = sum(wg * f_ for wg, f_ in act) / tot
+                fr = fr * (1 - mix) + g * mix
+            if t < 0.6:
+                fr = fr * ease(t / 0.6)                                 # open from black
             for n0, n1, layer in cap_events:
                 if n0 <= t < n1:
                     al = ease((t - n0) / 0.22) * ease((n1 - t) / 0.15)

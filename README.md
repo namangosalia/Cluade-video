@@ -13,4 +13,4 @@ Rebuild: `python3 edit/build.py` (add `--no-captions --out output/clean.mp4` for
 
 - `video2/output/anginax_why_prevention_9x16.mp4`: final 1080x1920 HDR reel
 - `video2/edit/build.py`: rebuilds it (`python3 video2/edit/build.py`)
-- `video2/edit/captions.py`: caption text and highlights; `video2/edit/scenes.py`: motion-graphic cutaways
+- `video2/edit/captions.py`: caption text and highlights; `video2/edit/cine.py`: original cinematic CGI cutaways
