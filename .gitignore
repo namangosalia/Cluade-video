@@ -1,2 +1,3 @@
-edit/.tmp/
+.tmp/
 __pycache__/
+edit/.tmp/
