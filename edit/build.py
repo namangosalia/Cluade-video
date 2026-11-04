@@ -86,7 +86,8 @@ def to_new(t_orig):
     return acc
 
 BODY = sum(s1 - s0 for s0, s1 in segs)
-OUTRO = 2.2
+OUTRO = 0.9          # frozen last frame while fading to black
+FADE_LEN = 1.25      # final fade-out length (starts on live frames)
 TOTAL = BODY + OUTRO
 print(f"segments: {len(segs)}  body {BODY:.2f}s  total {TOTAL:.2f}s (orig {DUR:.2f}s)")
 
@@ -150,8 +151,14 @@ def render_caption(text):
             layout.append((x, y, word, h, ul_end))
             x += wl + sp
     for x, y, word, h, _ in layout:
-        ds.text((x, y + 2), word, font=f_cap, fill=(0, 0, 0, 175))
-    img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(5)))
+        ds.text((x, y + 2), word, font=f_cap, fill=(0, 0, 0, 255))
+    # wide soft shadow + tight shadow so white text reads on the white shirt
+    wide = shadow.filter(ImageFilter.GaussianBlur(12))
+    wide.putalpha(wide.getchannel("A").point(lambda v: min(255, int(v * 1.5))))
+    img.alpha_composite(wide)
+    tight = shadow.filter(ImageFilter.GaussianBlur(3))
+    tight.putalpha(tight.getchannel("A").point(lambda v: int(v * 0.55)))
+    img.alpha_composite(tight)
     for x, y, word, h, ul_end in layout:
         dt.text((x, y), word, font=f_cap, fill=GOLD + (255,) if h else (255, 255, 255, 255))
         if h:
@@ -167,9 +174,9 @@ if not args.no_captions:
             nxt = to_new(CAPTIONS[i + 1][0]) - 0.05
             n1 = nxt if nxt - n1 < 0.45 else n1
         else:
-            n1 = BODY - 0.1
+            n1 = BODY + OUTRO
         cap_events.append((n0, n1, render_caption(text)))
-CAP_Y = 1480   # top of caption block; stays above Reels/Ads UI at the bottom
+CAP_Y = 800    # top of caption block: collar / upper-chest area
 
 
 # ---------------------------------------------------------------- b-roll cards
@@ -196,8 +203,8 @@ def make_card(path, width):
     card.alpha_composite(inner, (pad, pad))
     return card
 
-CARDS = [make_card(BROLL_IMAGES[0], 820), make_card(BROLL_IMAGES[1], 960)]
-CARD_CY = 820   # vertical centre of cards (captions sit below at CAP_Y)
+CARDS = [make_card(BROLL_IMAGES[0], 580), make_card(BROLL_IMAGES[1], 960)]
+CARD_CY = 480   # vertical centre of cards (above the captions at CAP_Y)
 
 def broll(fr_img, t):
     """fr_img: PIL RGB frame. Returns new PIL frame for time t (or None outside window)."""
@@ -240,8 +247,6 @@ lw = 150
 logo_small = logo.resize((lw, round(logo.height * lw / logo.width)), Image.LANCZOS)
 logo_small = np.asarray(logo_small).astype(np.float32) / 255
 LOGO_POS = (W - lw - 64, 150)
-lw2 = 400
-logo_big = np.asarray(logo.resize((lw2, round(logo.height * lw2 / logo.width)), Image.LANCZOS)).astype(np.float32) / 255
 
 def over(frame, layer, x, y, alpha=1.0):
     h, w = layer.shape[:2]
@@ -251,10 +256,11 @@ def over(frame, layer, x, y, alpha=1.0):
     roi[:] = roi * (1 - a) + layer[..., :3] * a
 
 # ---------------------------------------------------------------- video
-vf = ("zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,"
-      "zscale=t=bt709:m=bt709:r=tv,format=yuv420p,hqdn3d=1.5:1.5:4:4,"
-      "crop=492:874:7:0,scale=1080:1920:flags=lanczos,unsharp=5:5:0.5:5:5:0,"
-      "eq=contrast=1.04:saturation=0.92:gamma=0.98,vignette=PI/5,format=rgb24")
+# Keep the original lighting: HLG signal kept as-is, only BT.2020 -> BT.709 colour
+# primaries converted (no tone-mapping, grading or vignette).
+vf = ("zscale=tin=bt709:t=bt709:pin=bt2020:p=bt709:min=bt2020nc:m=bt709:rin=tv:r=tv,"
+      "format=yuv420p,hqdn3d=1.5:1.5:4:4,"
+      "crop=492:874:7:0,scale=1080:1920:flags=lanczos,unsharp=5:5:0.5:5:5:0,format=rgb24")
 dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", SRC, "-vf", vf, "-r", str(FPS),
                         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
 enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
@@ -301,20 +307,17 @@ for k, (s0, s1) in enumerate(segs):
                     rise = (1 - ease((t - n0) / 0.30)) * 5
                     over(fr, layer, 0, CAP_Y + rise, al)
             over(fr, logo_small, *LOGO_POS, 0.85 * ease(t / 0.6))
+            last = fr.copy()
+            fr *= ease((TOTAL - t) / FADE_LEN)
             enc.stdin.write((fr * 255 + 0.5).astype(np.uint8).tobytes())
-            last = fr
             out_t += 1 / FPS
         src_i += 1
 
-# outro: hold last frame, soften to dark, reveal logo
-blur = np.asarray(Image.fromarray((last * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(18))).astype(np.float32) / 255
+# outro: hold the last frame (captions + logo included) and finish the fade to black
 n_out = round(OUTRO * FPS)
 for i in range(n_out):
-    t = i / FPS
-    m = ease((t - 0.35) / 0.7)
-    fr = last * (1 - m) + blur * 0.18 * m
-    over(fr, logo_small, *LOGO_POS, 0.85 * (1 - m))
-    over(fr, logo_big, (W - logo_big.shape[1]) / 2, (H - logo_big.shape[0]) / 2 - 40, ease((t - 0.8) / 0.6))
+    t = out_t + i / FPS
+    fr = last * ease((TOTAL - t) / FADE_LEN)
     enc.stdin.write((np.clip(fr, 0, 1) * 255 + 0.5).astype(np.uint8).tobytes())
 
 enc.stdin.close(); enc.wait(); dec.terminate()
