@@ -121,6 +121,47 @@ OUTRO = 2.8          # grey end card with "Learn More"
 TOTAL = BODY + OUTRO
 print(f"segments: {len(segs)}  body {BODY:.2f}s  total {TOTAL:.2f}s (orig {DUR:.2f}s)")
 
+# ---------------------------------------------------------------- studio voice
+# The lav mic sounds muffled (3-6 kHz sits ~40 dB under the mids). Broadcast-style
+# chain, applied to the continuous recording before cutting so dynamics stay natural.
+VOICE_CHAIN = ",".join([
+    "highpass=f=70:poles=2",                         # rumble / handling noise
+    "afftdn=nr=8:nf=-48:tn=1",                       # light broadband denoise
+    "equalizer=f=130:t=q:w=0.9:g=1.5",               # chest warmth
+    "equalizer=f=520:t=q:w=1.1:g=-3",                # less boxy
+    "equalizer=f=2900:t=q:w=0.9:g=6",                # presence / intelligibility
+    "equalizer=f=5200:t=q:w=1.0:g=6",                # clarity
+    "highshelf=f=9000:g=2",                          # a touch of air
+    "deesser=i=0.4:m=0.5:f=0.5",                     # tame boosted sibilance
+    "acompressor=threshold=-21dB:ratio=3:attack=6:release=140:knee=4:makeup=2",
+    "alimiter=limit=0.89:attack=3:release=60:level=disabled",
+])
+raw = subprocess.run(["ffmpeg", "-v", "error", "-i", SRC, "-vn", "-af", VOICE_CHAIN, "-ac", "1",
+                      "-ar", "48000", "-f", "f32le", "-"], capture_output=True, check=True).stdout
+v = np.frombuffer(raw, "<f4").copy()
+# Duck the pauses between phrases by ~15 dB (room tone + music bed). Only stretches
+# that were measurably quiet in the original (< -30 dB) are touched, with margins
+# and 50 ms ramps, so word starts and tails stay intact.
+env = np.ones(len(v), np.float32)
+DUCK, RAMP = 10 ** (-15 / 20), 0.05
+for (s0, e0, _), (s1, _, _) in zip(words, words[1:]):
+    q = quiet_run(e0 - 0.1, s1 + 0.1)
+    if not q or q[1] - q[0] < 0.2:
+        continue
+    a0 = max(q[0], e0) + 0.14      # leave soft word endings ("-ing", "-al") untouched
+    a1 = min(q[1], s1) - 0.07      # and breaths / onsets before the next word
+    if a1 - a0 < 2 * RAMP:
+        continue
+    i0, i1, r = int(a0 * 48000), int(a1 * 48000), int(RAMP * 48000)
+    ramp = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, r))
+    env[i0:i0 + r] = np.minimum(env[i0:i0 + r], 1 - (1 - DUCK) * ramp)
+    env[i0 + r:i1 - r] = np.minimum(env[i0 + r:i1 - r], DUCK)
+    env[i1 - r:i1] = np.minimum(env[i1 - r:i1], DUCK + (1 - DUCK) * ramp)
+v *= env
+voice = os.path.join(TMP, "voice.wav")
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ar", "48000", "-ac", "1", "-i", "-",
+                "-ac", "2", "-c:a", "pcm_s24le", voice], input=v.tobytes(), check=True)
+
 # ---------------------------------------------------------------- audio edit
 fade = 0.012
 parts = []
@@ -129,9 +170,19 @@ for i, (s0, s1) in enumerate(segs):
                  f"afade=t=in:d={fade},afade=t=out:st={s1 - s0 - fade}:d={fade}[a{i}]")
 graph = ";".join(parts) + ";" + "".join(f"[a{i}]" for i in range(len(segs))) + \
         f"concat=n={len(segs)}:v=0:a=1,apad=whole_dur={TOTAL}[aout]"
+cut = os.path.join(TMP, "cut.wav")
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", voice, "-filter_complex", graph, "-map", "[aout]",
+                "-c:a", "pcm_s24le", cut], check=True)
+# two-pass loudness normalisation: -14 LUFS integrated, -1 dBTP (Instagram / Meta)
+meas = subprocess.run(["ffmpeg", "-hide_banner", "-i", cut, "-af",
+                       "loudnorm=I=-14:TP=-1:LRA=7:print_format=json", "-f", "null", "-"],
+                      capture_output=True, text=True).stderr
+m = json.loads(meas[meas.rindex("{"):meas.rindex("}") + 1])
+ln = (f"loudnorm=I=-14:TP=-1:LRA=7:linear=true:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
+      f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}")
 audio = os.path.join(TMP, "audio.m4a")
-subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SRC, "-filter_complex", graph, "-map", "[aout]",
-                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", audio], check=True)
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", cut, "-af", ln, "-ar", "48000",
+                "-c:a", "aac", "-b:a", "256k", audio], check=True)
 
 # ---------------------------------------------------------------- caption layers
 CAP_SIZE, CAP_LH = 40, 54
