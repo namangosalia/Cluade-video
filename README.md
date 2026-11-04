@@ -1,6 +1,6 @@
 # Anginax founder reel
 
-- `output/anginax_reel_9x16.mp4`: final 1080x1920 reel for Instagram Reels, Stories and Meta ads
+- `output/anginax_reel_9x16.mp4`: final 1080x1920 HDR (HLG, HEVC) reel for Instagram Reels, Stories and Meta ads; colours match the iPhone original
 - `source/raw.mp4`: original self-recorded clip
 - `assets/`: Anginax logo (original + version for dark backgrounds)
 - `edit/captions.py`: caption text, timing and highlighted phrases (`[brackets]`)

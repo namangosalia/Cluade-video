@@ -2,7 +2,8 @@
 """Anginax founder reel: cut pauses, grade, caption, brand.
 
 Usage: python3 edit/build.py [--no-captions] [--out output/anginax_reel_9x16.mp4]
-Requires: ffmpeg (with zscale/tonemap), numpy, Pillow, Inter font.
+Requires: ffmpeg (libx265), numpy, Pillow, Inter font.
+Output is HLG HDR (BT.2020), matching the iPhone source colour exactly.
 """
 import argparse, json, os, subprocess, wave
 import numpy as np
@@ -16,6 +17,35 @@ LOGO = os.path.join(ROOT, "assets", "logo_on_dark.png")
 FONT_DIR = "/usr/share/fonts/opentype/inter/"
 W, H, FPS = 1080, 1920, 30
 GOLD = (226, 196, 140)
+
+# ---------------------------------------------------------------- HDR (HLG) helpers
+# The source is iPhone HDR (HLG, BT.2020). We keep its pixels untouched and
+# deliver HLG HDR, so skin and lighting look exactly as recorded. Overlays are
+# designed in sRGB and mapped into HLG with SDR white at HDR reference white
+# (203 nits, ~75% HLG signal) per ITU-R BT.2408.
+_M709_2020 = np.array([[0.6274, 0.3293, 0.0433],
+                       [0.0691, 0.9195, 0.0114],
+                       [0.0164, 0.0880, 0.8956]], np.float32)
+
+def srgb_to_hlg(rgb):
+    """rgb: float array [..., 3] in 0..1 sRGB -> HLG BT.2020 signal 0..1."""
+    v = np.clip(rgb, 0, 1)
+    lin = np.where(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055) ** 2.4)
+    lin = np.clip(lin @ _M709_2020.T, 0, 1)
+    e = (lin * 0.203) ** (1 / 1.2)            # inverse OOTF (1000-nit, gamma 1.2)
+    a, b, c = 0.17883277, 0.28466892, 0.55991073
+    return np.where(e <= 1 / 12, np.sqrt(3 * e), a * np.log(np.maximum(12 * e - b, 1e-6)) + c).astype(np.float32)
+
+def layer_to_hlg(rgba):
+    out = rgba.copy()
+    out[..., :3] = srgb_to_hlg(rgba[..., :3])
+    return out
+
+def resize_f(arr, size, box=None, resample=Image.BICUBIC):
+    """Resize a float [h, w, c] array channel by channel (keeps 16-bit+ precision)."""
+    chans = [np.asarray(Image.fromarray(np.ascontiguousarray(arr[..., i]), "F").resize(size, resample, box=box))
+             for i in range(arr.shape[2])]
+    return np.stack(chans, axis=-1)
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--no-captions", action="store_true")
@@ -162,7 +192,7 @@ def render_caption(text):
         dt.text((x, y), word, font=f_cap, fill=GOLD + (255,) if h else (255, 255, 255, 255))
         if h:
             dt.line((x, y + 50, ul_end, y + 50), fill=GOLD + (190,), width=2)
-    return np.asarray(img).astype(np.float32) / 255
+    return layer_to_hlg(np.asarray(img).astype(np.float32) / 255)
 
 cap_events = []
 if not args.no_captions:
@@ -187,6 +217,10 @@ BROLL_START = to_new(37.70) - 0.10
 BROLL_END = to_new(41.60) + 0.35
 print(f"b-roll {BROLL_START:.2f}-{BROLL_END:.2f}s ({BROLL_END - BROLL_START:.2f}s)")
 
+def ease(x):
+    x = min(max(x, 0.0), 1.0)
+    return x * x * (3 - 2 * x)
+
 def make_card(path, width):
     im = Image.open(path).convert("RGB")
     im = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
@@ -200,51 +234,50 @@ def make_card(path, width):
     card.putalpha(sh.filter(ImageFilter.GaussianBlur(18)))   # soft drop shadow
     inner = im.convert("RGBA"); inner.putalpha(mask)
     card.alpha_composite(inner, (pad, pad))
-    return card
+    return layer_to_hlg(np.asarray(card).astype(np.float32) / 255)
 
 CARDS = [make_card(BROLL_IMAGES[0], 580), make_card(BROLL_IMAGES[1], 960)]
 CARD_CY = 480   # vertical centre of cards (above the captions at CAP_Y)
+DIM = srgb_to_hlg(np.array([8, 10, 14], np.float32) / 255)
 
-def broll(fr_img, t):
-    """fr_img: PIL RGB frame. Returns new PIL frame for time t (or None outside window)."""
+def soft_blur(fr):
+    small = resize_f(fr, (W // 6, H // 6), resample=Image.BILINEAR)
+    small = resize_f(small, (W // 12, H // 12), resample=Image.BILINEAR)
+    return resize_f(small, (W, H), resample=Image.BICUBIC)
+
+def broll(fr, t):
+    """fr: float HLG frame [H, W, 3]. Returns composited frame, or None outside window."""
     if not (BROLL_START <= t < BROLL_END):
         return None
     d = BROLL_END - BROLL_START
     u = (t - BROLL_START) / d
     fade_in = ease((t - BROLL_START) / 0.45)
     fade_out = ease((BROLL_END - t) / 0.40)
-    bg_mix = fade_in * fade_out
-    small = fr_img.resize((W // 6, H // 6), Image.BILINEAR).filter(ImageFilter.GaussianBlur(4))
-    bg = small.resize((W, H), Image.BILINEAR)
-    bg = Image.blend(bg, Image.new("RGB", (W, H), (8, 10, 14)), 0.45)
-    base = Image.blend(fr_img, bg, bg_mix).convert("RGBA")
+    bg = soft_blur(fr) * 0.55 + DIM * 0.45
+    m = fade_in * fade_out
+    base = fr * (1 - m) + bg * m
     swap_mid, swap_len = 0.48, 0.16 * d   # slow swipe between the two cards
     tm = BROLL_START + swap_mid * d
     sw = ease((t - (tm - swap_len / 2)) / swap_len)   # 0 -> card 1, 1 -> card 2
-    drift = -60 * u   # continuous slow leftward drift
+    drift = -60 * u                                    # continuous slow leftward drift
+    sc = 1.0 + 0.035 * u                               # very slow push-in
     for i, card in enumerate(CARDS):
         if i == 0:
-            alpha = fade_in * (1 - sw); dx = drift - 520 * sw
-            sc = 1.0 + 0.035 * u
-            dx += 50 * (1 - fade_in)
+            alpha, dx = fade_in * (1 - sw), drift - 520 * sw + 50 * (1 - fade_in)
         else:
-            alpha = sw * fade_out; dx = drift + 520 * (1 - sw) + 40
-            sc = 1.0 + 0.035 * u
+            alpha, dx = sw * fade_out, drift + 520 * (1 - sw) + 40
         if alpha <= 0.003:
             continue
-        cw, ch = round(card.width * sc), round(card.height * sc)
-        c = card.resize((cw, ch), Image.BICUBIC)
-        if alpha < 1:
-            a = c.getchannel("A").point(lambda v, al=alpha: int(v * al))
-            c.putalpha(a)
-        base.alpha_composite(c, (int((W - cw) / 2 + dx), int(CARD_CY - ch / 2)))
-    return base.convert("RGB")
+        ch, cw = card.shape[:2]
+        c = resize_f(card, (round(cw * sc), round(ch * sc)))
+        over_clip(base, c, (W - c.shape[1]) / 2 + dx, CARD_CY - c.shape[0] / 2, alpha)
+    return base
 
 # ---------------------------------------------------------------- logo
 logo = Image.open(LOGO)
 lw = 150
 logo_small = logo.resize((lw, round(logo.height * lw / logo.width)), Image.LANCZOS)
-logo_small = np.asarray(logo_small).astype(np.float32) / 255
+logo_small = layer_to_hlg(np.asarray(logo_small).astype(np.float32) / 255)
 LOGO_POS = (W - lw - 64, 150)
 
 def over(frame, layer, x, y, alpha=1.0):
@@ -254,42 +287,50 @@ def over(frame, layer, x, y, alpha=1.0):
     a = layer[..., 3:4] * alpha
     roi[:] = roi * (1 - a) + layer[..., :3] * a
 
+def over_clip(frame, layer, x, y, alpha=1.0):
+    """Like over(), but the layer may extend past the frame edges."""
+    x, y = int(x), int(y)
+    h, w = layer.shape[:2]
+    x0, y0, x1, y1 = max(x, 0), max(y, 0), min(x + w, W), min(y + h, H)
+    if x1 <= x0 or y1 <= y0:
+        return
+    over(frame[y0:y1, x0:x1], layer[y0 - y:y1 - y, x0 - x:x1 - x], 0, 0, alpha)
+
 # ---------------------------------------------------------------- video
-# HLG -> SDR the standard way (HDR reference white 203 nits = SDR white), soft
-# highlight roll-off, then saturation trimmed to keep natural skin tone.
-# No brightness grade and no vignette: original lighting is kept.
-vf = ("zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,"
-      "tonemap=reinhard:param=0.5:desat=0,zscale=t=bt709:m=bt709:r=tv,"
-      "format=yuv420p,eq=saturation=0.85,hqdn3d=1.5:1.5:4:4,"
-      "crop=492:874:7:0,scale=1080:1920:flags=lanczos,unsharp=5:5:0.5:5:5:0,format=rgb24")
+# Pixels stay in the original HLG / BT.2020 signal: no tone-mapping, grading,
+# denoise or vignette. Only crop to 9:16, upscale, and a very light sharpen.
+vf = ("crop=492:874:7:0,scale=1080:1920:flags=lanczos,unsharp=5:5:0.3:5:5:0,"
+      "scale=in_color_matrix=bt2020:in_range=tv:out_range=pc,format=rgb48le")
 dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", SRC, "-vf", vf, "-r", str(FPS),
-                        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
-enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                        "-f", "rawvideo", "-pix_fmt", "rgb48le", "-"], stdout=subprocess.PIPE)
+enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb48le",
                         "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-i", audio,
-                        "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "slow", "-crf", "17",
-                        "-profile:v", "high", "-pix_fmt", "yuv420p", "-colorspace", "bt709",
-                        "-color_primaries", "bt709", "-color_trc", "bt709",
+                        "-map", "0:v", "-map", "1:a",
+                        "-vf", "scale=out_color_matrix=bt2020:in_range=pc:out_range=tv,format=yuv420p10le",
+                        "-c:v", "libx265", "-preset", "medium", "-crf", "16", "-tag:v", "hvc1",
+                        "-x265-params", "log-level=error:colorprim=bt2020:transfer=arib-std-b67:"
+                                        "colormatrix=bt2020nc:range=limited",
+                        "-color_primaries", "bt2020", "-color_trc", "arib-std-b67",
+                        "-colorspace", "bt2020nc", "-color_range", "tv",
                         "-c:a", "copy", "-movflags", "+faststart", "-shortest", args.out],
                        stdin=subprocess.PIPE)
 
 ZOOMS = [1.0, 1.075]
 FOCUS_Y = 0.30   # keep the face in place when punching in
 
-def zoom(img, z):
+def zoom(fr, z):
     if z == 1.0:
-        return img
+        return fr
     cw, ch = W / z, H / z
     x0 = (W - cw) / 2
     y0 = (H - ch) * FOCUS_Y
-    return img.resize((W, H), Image.BICUBIC, box=(x0, y0, x0 + cw, y0 + ch))
+    return resize_f(fr, (W, H), box=(x0, y0, x0 + cw, y0 + ch))
 
-def ease(x):
-    x = min(max(x, 0.0), 1.0)
-    return x * x * (3 - 2 * x)
+def write(fr):
+    enc.stdin.write((np.clip(fr, 0, 1) * 65535 + 0.5).astype("<u2").tobytes())
 
-frame_size = W * H * 3
+frame_size = W * H * 3 * 2
 src_i, out_t, last = 0, 0.0, None
-seg_idx = 0
 for k, (s0, s1) in enumerate(segs):
     z = ZOOMS[k % 2]
     f0, f1 = round(s0 * FPS), round(s1 * FPS)
@@ -298,47 +339,52 @@ for k, (s0, s1) in enumerate(segs):
         if len(buf) < frame_size:
             break
         if src_i >= f0:
-            img = zoom(Image.frombuffer("RGB", (W, H), buf), z)
+            fr = np.frombuffer(buf, "<u2").reshape(H, W, 3).astype(np.float32) / 65535
+            fr = zoom(fr, z)
             t = out_t
-            img = broll(img, t) or img
-            fr = np.asarray(img).astype(np.float32) / 255
+            b = broll(fr, t)
+            fr = b if b is not None else fr.copy()
             for n0, n1, layer in cap_events:
                 if n0 <= t < n1:
                     al = ease((t - n0) / 0.22) * ease((n1 - t) / 0.15)
                     rise = (1 - ease((t - n0) / 0.30)) * 5
                     over(fr, layer, 0, CAP_Y + rise, al)
             over(fr, logo_small, *LOGO_POS, 0.85 * ease(t / 0.6))
-            last = fr.copy()
-            enc.stdin.write((fr * 255 + 0.5).astype(np.uint8).tobytes())
+            write(fr)
+            last = fr
             out_t += 1 / FPS
         src_i += 1
 
-# outro: last frame dissolves into a soft grey background, "Learn More" in the centre
+# ---------------------------------------------------------------- outro
+# Last frame dissolves into a soft grey background with a highlighted
+# "Learn More" call-to-action card in the centre.
 def make_cta(text="LEARN MORE"):
-    f = ImageFont.truetype(FONT_DIR + "Inter-Medium.otf", 40)
+    f = ImageFont.truetype(FONT_DIR + "Inter-SemiBold.otf", 38)
     d = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     track = 6
     widths = [d.textlength(ch, font=f) for ch in text]
     tw = sum(widths) + track * (len(text) - 1)
-    pw, ph = int(tw + 2 * 64), 100
-    img = Image.new("RGBA", (pw + 8, ph + 8), (0, 0, 0, 0))
+    pw, ph = int(tw + 2 * 70), 104
+    pad = 30
+    img = Image.new("RGBA", (pw + 2 * pad, ph + 2 * pad), (0, 0, 0, 0))
+    sh = Image.new("L", img.size, 0)
+    ImageDraw.Draw(sh).rounded_rectangle((pad, pad + 8, pad + pw, pad + ph + 8), ph // 2, fill=110)
+    img.putalpha(sh.filter(ImageFilter.GaussianBlur(14)))           # soft shadow
     dr = ImageDraw.Draw(img)
-    dr.rounded_rectangle((4, 4, 4 + pw, 4 + ph), ph // 2, outline=(255, 255, 255, 210), width=2)
-    x = 4 + (pw - tw) / 2
+    dr.rounded_rectangle((pad, pad, pad + pw, pad + ph), ph // 2, fill=(255, 255, 255, 255))
+    x = pad + (pw - tw) / 2
     asc, desc = f.getmetrics()
-    y = 4 + (ph - (asc + desc)) / 2 + 2
+    y = pad + (ph - (asc + desc)) / 2 + 2
     for ch, wd in zip(text, widths):
-        dr.text((x, y), ch, font=f, fill=(255, 255, 255, 255))
+        dr.text((x, y), ch, font=f, fill=(34, 36, 40, 255))
         x += wd + track
-    return np.asarray(img).astype(np.float32) / 255
+    return layer_to_hlg(np.asarray(img).astype(np.float32) / 255)
 
 cta = make_cta()
-GREY = np.array([0.30, 0.30, 0.31], np.float32)
-g = Image.fromarray((last * 255).astype(np.uint8)).resize((W // 8, H // 8), Image.BILINEAR)
-g = g.filter(ImageFilter.GaussianBlur(6)).resize((W, H), Image.BILINEAR)
-g = np.asarray(g).astype(np.float32) / 255
-lum = (g @ np.array([0.299, 0.587, 0.114], np.float32))[..., None]
-grey_bg = GREY * 0.7 + lum * 0.3 * np.ones(3, np.float32)   # grey, keeps a hint of the light
+GREY = srgb_to_hlg(np.array([0.36, 0.36, 0.37], np.float32))
+g = resize_f(resize_f(last, (18, 32), resample=Image.BILINEAR), (W, H), resample=Image.BICUBIC)
+lum = (g @ np.array([0.2627, 0.6780, 0.0593], np.float32))[..., None]   # BT.2020 luma
+grey_bg = GREY * 0.85 + lum * 0.15        # near-flat grey, faint trace of the curtain light
 n_out = round(OUTRO * FPS)
 for i in range(n_out):
     t = i / FPS
@@ -346,8 +392,10 @@ for i in range(n_out):
     fr = last * (1 - m) + grey_bg * m
     over(fr, logo_small, *LOGO_POS, 0.85 * (1 - m))
     a = ease((t - 0.7) / 0.6)
-    over(fr, cta, (W - cta.shape[1]) / 2, (H - cta.shape[0]) / 2 + (1 - a) * 6, a)
-    enc.stdin.write((np.clip(fr, 0, 1) * 255 + 0.5).astype(np.uint8).tobytes())
+    sc = 0.97 + 0.03 * a
+    c = resize_f(cta, (round(cta.shape[1] * sc), round(cta.shape[0] * sc)))
+    over(fr, c, (W - c.shape[1]) / 2, (H - c.shape[0]) / 2, a)
+    write(fr)
 
 enc.stdin.close(); enc.wait(); dec.terminate()
 print("wrote", args.out)
