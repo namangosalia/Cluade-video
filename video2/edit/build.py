@@ -12,7 +12,8 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from captions import CAPTIONS, DRAMATIC_AFTER
+from captions import GROUPS, STATEMENTS, DRAMATIC_AFTER
+import trailer_text as tt
 import cine
 import flow
 
@@ -92,7 +93,7 @@ cuts = []
 for q0, q1 in runs:
     if q0 < START or q1 > END:
         continue
-    keep = 0.75 if any(abs(q0 - d) < 0.08 for d in DRAMATIC_AFTER) else 0.34
+    keep = 0.62 if any(abs(q0 - d) < 0.08 for d in DRAMATIC_AFTER) else 0.30
     c0, c1 = q0 + keep * 0.55, q1 - keep * 0.45
     if c1 - c0 > 0.08:
         cuts.append((c0, c1))
@@ -149,80 +150,11 @@ audio = os.path.join(TMP, "audio.m4a")
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", cut, "-af", ln, "-ar", "48000", "-c:a", "aac",
                 "-b:a", "256k", audio], check=True)
 
-# ---------------------------------------------------------------- captions
-CAP_SIZE, CAP_LH, CAP_WHITE, CAP_Y = 40, 54, 0.60, 880
-f_cap = ImageFont.truetype(FONT_DIR + "Inter-Medium.otf", CAP_SIZE)
-f_num = ImageFont.truetype(FONT_DIR + "Inter-SemiBold.otf", CAP_SIZE)
-NUM_WORDS = {"millions", "thousands"}
-
-def is_num(word):
-    return any(ch.isdigit() for ch in word) or word.strip(".,?").lower() in NUM_WORDS
-
-def render_caption(text):
-    tokens, hl = [], False
-    for raw in text.split(" "):
-        word = raw
-        if word.startswith("["):
-            hl, word = True, word[1:]
-        end_hl = "]" in word
-        word = word.replace("]", "")
-        tokens.append((word, hl))
-        if end_hl:
-            hl = False
-    d = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    fo = lambda wd, h: f_num if (h and is_num(wd)) else f_cap
-    sp = d.textlength(" ", font=f_cap)
-    tw = lambda l: sum(d.textlength(x, font=fo(x, h)) for x, h in l) + sp * (len(l) - 1)
-    maxw = 1000
-    if tw(tokens) <= maxw:
-        lines = [tokens]
-    else:
-        best = None
-        for i in range(1, len(tokens)):
-            l0, l1 = tokens[:i], tokens[i:]
-            if tw(l0) > maxw or tw(l1) > maxw:
-                continue
-            score = max(tw(l0), tw(l1)) - (40 if tokens[i][1] and not tokens[i - 1][1] else 0) \
-                + (400 if tokens[i][1] and tokens[i - 1][1] else 0)
-            if best is None or score < best[0]:
-                best = (score, [l0, l1])
-        lines = best[1]
-    img = Image.new("RGBA", (W, CAP_LH * len(lines) + 30), (0, 0, 0, 0))
-    shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    ds, dt = ImageDraw.Draw(shadow), ImageDraw.Draw(img)
-    layout = []
-    for li, line in enumerate(lines):
-        x = (W - tw(line)) / 2
-        y = 10 + li * CAP_LH
-        for j, (word, h) in enumerate(line):
-            f = fo(word, h)
-            wl = d.textlength(word, font=f)
-            ul_end = x + wl + (sp if j + 1 < len(line) and line[j + 1][1] and h else 0)
-            layout.append((x, y, word, h, ul_end, f))
-            x += wl + sp
-    for x, y, word, h, _, f in layout:
-        ds.text((x, y + 2), word, font=f, fill=(0, 0, 0, 255))
-    wide = shadow.filter(ImageFilter.GaussianBlur(12))
-    wide.putalpha(wide.getchannel("A").point(lambda v: min(255, int(v * 1.5))))
-    img.alpha_composite(wide)
-    tight = shadow.filter(ImageFilter.GaussianBlur(3))
-    tight.putalpha(tight.getchannel("A").point(lambda v: int(v * 0.55)))
-    img.alpha_composite(tight)
-    for x, y, word, h, ul_end, f in layout:
-        dt.text((x, y), word, font=f, fill=GOLD + (255,) if h else (255, 255, 255, 255))
-        if h:
-            dt.line((x, y + 50, ul_end, y + 50), fill=GOLD + (190,), width=2)
-    return layer_to_hlg(np.asarray(img).astype(np.float32) / 255, white=CAP_WHITE)
-
-cap_events = []
-for i, (t0, t1, text) in enumerate(CAPTIONS):
-    n0, n1 = to_new(t0) - 0.05, to_new(t1) + 0.25
-    if i + 1 < len(CAPTIONS):
-        nxt = to_new(CAPTIONS[i + 1][0]) - 0.05
-        n1 = nxt if nxt - n1 < 0.45 else n1
-    else:
-        n1 = BODY + 0.25
-    cap_events.append((n0, n1, render_caption(text)))
+# ---------------------------------------------------------------- trailer typography
+cap_groups = tt.build_groups(GROUPS, words, to_new, BODY)
+statements = tt.build_statements(STATEMENTS, words, to_new)
+for st in statements:
+    print(f"statement {st.kind:8s} {st.t0:6.2f}-{st.t1:6.2f}s")
 
 # ---------------------------------------------------------------- cutaway scenes
 def window(o0, o1, lead=0.15, tail=0.12):
@@ -243,57 +175,14 @@ for i, (o, cls) in enumerate(_shots):
 for a_, b_, fn in SCENES:
     print(f"shot  {type(fn).__name__:10s} {a_:6.2f}-{b_:6.2f}s")
 
-# Number moments: Naman's shot slowly greys out and dims while the number
-# animates in underneath the caption; colour returns when the moment ends.
-T = to_new
-GRAY = [(T(1.34) - 0.5, T(8.68) - 0.6), (T(11.02) - 0.6, T(23.04) - 0.2)]
-GRAY_IN, GRAY_OUT = 1.0, 0.9
-NUM_CY, LAB_CY = 1250, 1400
-
+# Statement moments: Naman greys out and dims behind full-screen type.
 def gray_amount(t):
     g = 0.0
-    for a_, b_ in GRAY:
-        if a_ <= t < b_ + GRAY_OUT:
-            g = max(g, ease((t - a_) / GRAY_IN) * (1 - ease((t - b_) / GRAY_OUT)))
+    for st in statements:
+        a_, b_ = st.t0 - 0.25, st.t1
+        if a_ <= t < b_ + 0.5:
+            g = max(g, ease((t - a_) / 0.5) * (1 - ease((t - b_) / 0.5)))
     return g
-
-def ease_out(x):
-    x = min(max(x, 0.0), 1.0)
-    return 1 - (1 - x) ** 3
-
-def number_lines(t, g):
-    big = cine.font("InterDisplay-Light.otf", 200)
-    lab = cine.font("Inter-Medium.otf", 32)
-    L = []
-    def label(text, t_in, t_out=None):
-        a = ease((t - t_in) / 0.7)
-        if t_out is not None:
-            a *= 1 - ease((t - t_out) / 0.5)
-        if a > 0:
-            L.append((text, lab, cine.WARM_WHITE, a * 0.92 * g, LAB_CY, 12))
-    if t < T(9.5):
-        a_m = ease((t - T(1.34)) / 1.0) * (1 - ease((t - T(5.30) + 0.5) / 0.6))
-        if a_m > 0:
-            L.append(("MILLIONS", cine.font("InterDisplay-Light.otf", 150), cine.GOLD, a_m * g, NUM_CY, 22))
-        a_8 = ease((t - T(5.30) + 0.1) / 0.8)
-        if a_8 > 0:
-            n = int(round(ease_out((t - T(5.30) + 0.1) / 2.2) * 80))
-            L.append((f"{n}%", big, cine.GOLD, a_8 * g, NUM_CY, 8))
-        label("PREVENTABLE", T(7.14))
-    elif t >= T(10.0):
-        a_n = ease((t - T(11.02) + 0.1) / 0.8)
-        if a_n > 0:
-            t_tot = T(20.9)
-            if t < t_tot:
-                n = ease_out((t - T(11.02) + 0.1) / 2.6) * 59000
-            else:
-                n = 59000 + (236000 - 59000) * ease_out((t - t_tot) / 1.4)
-            L.append((f"{int(round(n)):,}", big, cine.GOLD, a_n * g, NUM_CY, 6))
-        days = [("TODAY", T(14.30)), ("TOMORROW", T(17.50)), ("THE DAY AFTER", T(19.24)),
-                ("AND THE DAY AFTER THAT", T(20.74)), ("IN JUST FOUR DAYS", T(21.30))]
-        for k, (text, ti) in enumerate(days):
-            label(text, ti, days[k + 1][1] - 0.35 if k + 1 < len(days) else None)
-    return L
 
 DISSOLVE = 0.45
 
@@ -323,6 +212,8 @@ enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_f
                        stdin=subprocess.PIPE)
 
 FOCUS_Y = 0.30
+# (start, end) zoom per cut: wide, push-in close, medium pull-out, tight
+FRAMES = [(1.00, 1.05), (1.20, 1.15), (1.08, 1.13), (1.26, 1.20), (1.04, 1.00), (1.14, 1.20)]
 PUSH_FROM = to_new(52.79)          # slow push-in through the closing question
 
 def zoom(fr, z):
@@ -346,7 +237,11 @@ for k, (s0, s1) in enumerate(segs):
         if src_i >= f0:
             t = out_t
             fr = np.frombuffer(buf, "<u2").reshape(H, W, 3).astype(np.float32) / 65535
-            z = 1.0 + 0.10 * ease((t - PUSH_FROM) / (BODY - PUSH_FROM)) if t >= PUSH_FROM else (1.0, 1.075)[k % 2]
+            if t >= PUSH_FROM:
+                z = 1.04 + 0.14 * ease((t - PUSH_FROM) / (BODY - PUSH_FROM))
+            else:
+                z0, z1 = FRAMES[k % len(FRAMES)]
+                z = z0 + (z1 - z0) * ease((src_i - f0) / max(f1 - f0, 1))
             fr = zoom(fr, z)
             # cross-dissolve: speaker <-> cutaways (and cutaway <-> cutaway where they overlap)
             act = []
@@ -362,17 +257,15 @@ for k, (s0, s1) in enumerate(segs):
             g = gray_amount(t)
             if g > 0:
                 Y = (fr @ np.array([0.2627, 0.6780, 0.0593], np.float32))[..., None]
-                fr = (fr * (1 - 0.88 * g) + Y * 0.88 * g) * (1 - 0.42 * g)
-                lines = number_lines(t, g)
-                if lines:
-                    lay = cine.tracked_layer(lines)
-                    if lay:
-                        over(fr, *lay)
-            for n0, n1, layer in cap_events:
-                if n0 <= t < n1:
-                    al = ease((t - n0) / 0.35) * ease((n1 - t) / 0.25)
-                    rise = (1 - ease((t - n0) / 0.30)) * 5
-                    over(fr, layer, 0, CAP_Y + rise, al)
+                fr = (fr * (1 - 0.90 * g) + Y * 0.90 * g) * (1 - 0.50 * g)
+            for st in statements:
+                lay = st.render(t)
+                if lay:
+                    over(fr, *lay)
+            for grp in (cap_groups if g < 0.25 else ()):     # captions give way to statements
+                lay = grp.render(t)
+                if lay:
+                    over(fr, *lay)
             over(fr, logo_small, *LOGO_POS, ease(t / 0.6))
             write(fr)
             last = fr

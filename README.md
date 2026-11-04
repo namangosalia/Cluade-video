@@ -13,4 +13,4 @@ Rebuild: `python3 edit/build.py` (add `--no-captions --out output/clean.mp4` for
 
 - `video2/output/anginax_why_prevention_9x16.mp4`: final 1080x1920 HDR reel
 - `video2/edit/build.py`: rebuilds it (`python3 video2/edit/build.py`)
-- `video2/edit/captions.py`: caption text and highlights; `video2/edit/flow.py`: the five-shot "effort of prevention" sequence; `video2/edit/cine.py`: rendering helpers
+- `video2/edit/captions.py`: trailer captions (word groups + full-screen statements); `video2/edit/trailer_text.py`: their typography; `video2/edit/flow.py`: the five-shot "effort of prevention" sequence; `video2/edit/cine.py`: rendering helpers
