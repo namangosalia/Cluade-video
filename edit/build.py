@@ -377,6 +377,41 @@ for (x0, y0, x1, y1) in chart_plate.PILLS:
 _pill_any = np.clip(sum(_pill_alpha_mask), 0, 1)
 _glow_col = srgb_to_hlg(np.array([1.0, 1.0, 1.0], np.float32), white=CARD_WHITE)
 
+# Gentle push-in on the chart while the curve draws, then ease back out to the
+# full graphic. The card frame stays put; only the picture inside it moves.
+IG_ZOOM = 1.30
+IG_FOCUS = (1175, 430)        # chart panel centre (image px)
+_iw, _ih = _cw - 2 * IG_PAD, _ch - 2 * IG_PAD
+_inner = Image.new("L", (_cw, _ch), 0)
+ImageDraw.Draw(_inner).rounded_rectangle((IG_PAD, IG_PAD, IG_PAD + _iw - 1, IG_PAD + _ih - 1), 16, fill=255)
+_inner = (np.asarray(_inner).astype(np.float32) / 255)[IG_PAD:IG_PAD + _ih, IG_PAD:IG_PAD + _iw, None]
+
+def ig_zoom(t):
+    """(zoom, focus_x, focus_y) in image px."""
+    t_in0, t_in1 = IG_KEYS[0][0] - 0.15, IG_KEYS[0][0] + 1.4      # push in as the line starts
+    t_out0, t_out1 = IG_KEYS[-1][0] + 0.2, IG_KEYS[-1][0] + 1.8   # ease out after "over time"
+    k = ease((t - t_in0) / (t_in1 - t_in0)) * (1 - ease((t - t_out0) / (t_out1 - t_out0)))
+    z = 1 + (IG_ZOOM - 1) * k
+    tip = ig_tip(t)
+    fx = IG_FOCUS[0] + 0.18 * (tip - IG_FOCUS[0])                  # drift slightly with the line
+    fy = IG_FOCUS[1]
+    cx0, cy0 = ig_orig.shape[1] / 2, ig_orig.shape[0] / 2
+    return z, cx0 + (fx - cx0) * k, cy0 + (fy - cy0) * k
+
+def apply_zoom(card, t):
+    z, fx, fy = ig_zoom(t)
+    if z <= 1.0005:
+        return card
+    inner = card[IG_PAD:IG_PAD + _ih, IG_PAD:IG_PAD + _iw, :3]
+    bw, bh = _iw / z, _ih / z
+    cx, cy = fx * IG_SC, fy * IG_SC
+    x0 = min(max(cx - bw / 2, 0), _iw - bw)
+    y0 = min(max(cy - bh / 2, 0), _ih - bh)
+    zoomed = resize_f(inner, (_iw, _ih), box=(x0, y0, x0 + bw, y0 + bh))
+    out = card.copy()
+    out[IG_PAD:IG_PAD + _ih, IG_PAD:IG_PAD + _iw, :3] = zoomed * _inner + inner * (1 - _inner)
+    return out
+
 def ig_card(t):
     tip = ig_tip(t)
     reveal = np.clip((tip - _xs) / 10 + 0.5, 0, 1)[None, :] * np.ones((_ch, 1), np.float32)
@@ -397,7 +432,7 @@ def ig_card(t):
         a = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * 7.0 ** 2)) * 0.85 * g
         sub = card[y0:y1, x0:x1, :3]
         sub[:] = sub * (1 - a[..., None]) + _glow_col * a[..., None]
-    return card
+    return apply_zoom(card, t)
 
 def infographic(fr, t):
     if not (IG_START <= t < IG_END):
