@@ -171,6 +171,69 @@ if not args.no_captions:
         cap_events.append((n0, n1, render_caption(text)))
 CAP_Y = 1480   # top of caption block; stays above Reels/Ads UI at the bottom
 
+
+# ---------------------------------------------------------------- b-roll cards
+# Slow "swipe" of two proof images over: "And that's the conversation Anginax
+# is bringing to global health." Live video stays underneath, blurred + dimmed.
+BROLL_IMAGES = [os.path.join(ROOT, "assets", "press_un_article.jpg"),
+                os.path.join(ROOT, "assets", "world_heart_summit.jpg")]
+BROLL_START = to_new(37.70) - 0.10
+BROLL_END = to_new(41.60) + 0.35
+print(f"b-roll {BROLL_START:.2f}-{BROLL_END:.2f}s ({BROLL_END - BROLL_START:.2f}s)")
+
+def make_card(path, width):
+    im = Image.open(path).convert("RGB")
+    im = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
+    im = im.filter(ImageFilter.UnsharpMask(radius=1.2, percent=40, threshold=2))
+    r, pad = 16, 40
+    mask = Image.new("L", im.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, im.width - 1, im.height - 1), r, fill=255)
+    card = Image.new("RGBA", (im.width + 2 * pad, im.height + 2 * pad), (0, 0, 0, 0))
+    sh = Image.new("L", card.size, 0)
+    ImageDraw.Draw(sh).rounded_rectangle((pad, pad + 10, pad + im.width, pad + im.height + 10), r, fill=150)
+    card.putalpha(sh.filter(ImageFilter.GaussianBlur(18)))   # soft drop shadow
+    inner = im.convert("RGBA"); inner.putalpha(mask)
+    card.alpha_composite(inner, (pad, pad))
+    return card
+
+CARDS = [make_card(BROLL_IMAGES[0], 820), make_card(BROLL_IMAGES[1], 960)]
+CARD_CY = 820   # vertical centre of cards (captions sit below at CAP_Y)
+
+def broll(fr_img, t):
+    """fr_img: PIL RGB frame. Returns new PIL frame for time t (or None outside window)."""
+    if not (BROLL_START <= t < BROLL_END):
+        return None
+    d = BROLL_END - BROLL_START
+    u = (t - BROLL_START) / d
+    fade_in = ease((t - BROLL_START) / 0.45)
+    fade_out = ease((BROLL_END - t) / 0.40)
+    bg_mix = fade_in * fade_out
+    small = fr_img.resize((W // 6, H // 6), Image.BILINEAR).filter(ImageFilter.GaussianBlur(4))
+    bg = small.resize((W, H), Image.BILINEAR)
+    bg = Image.blend(bg, Image.new("RGB", (W, H), (8, 10, 14)), 0.45)
+    base = Image.blend(fr_img, bg, bg_mix).convert("RGBA")
+    swap_mid, swap_len = 0.48, 0.16 * d   # slow swipe between the two cards
+    tm = BROLL_START + swap_mid * d
+    sw = ease((t - (tm - swap_len / 2)) / swap_len)   # 0 -> card 1, 1 -> card 2
+    drift = -60 * u   # continuous slow leftward drift
+    for i, card in enumerate(CARDS):
+        if i == 0:
+            alpha = fade_in * (1 - sw); dx = drift - 520 * sw
+            sc = 1.0 + 0.035 * u
+            dx += 50 * (1 - fade_in)
+        else:
+            alpha = sw * fade_out; dx = drift + 520 * (1 - sw) + 40
+            sc = 1.0 + 0.035 * u
+        if alpha <= 0.003:
+            continue
+        cw, ch = round(card.width * sc), round(card.height * sc)
+        c = card.resize((cw, ch), Image.BICUBIC)
+        if alpha < 1:
+            a = c.getchannel("A").point(lambda v, al=alpha: int(v * al))
+            c.putalpha(a)
+        base.alpha_composite(c, (int((W - cw) / 2 + dx), int(CARD_CY - ch / 2)))
+    return base.convert("RGB")
+
 # ---------------------------------------------------------------- logo
 logo = Image.open(LOGO)
 lw = 150
@@ -229,8 +292,9 @@ for k, (s0, s1) in enumerate(segs):
             break
         if src_i >= f0:
             img = zoom(Image.frombuffer("RGB", (W, H), buf), z)
-            fr = np.asarray(img).astype(np.float32) / 255
             t = out_t
+            img = broll(img, t) or img
+            fr = np.asarray(img).astype(np.float32) / 255
             for n0, n1, layer in cap_events:
                 if n0 <= t < n1:
                     al = ease((t - n0) / 0.22) * ease((n1 - t) / 0.15)
