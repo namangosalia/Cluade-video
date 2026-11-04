@@ -278,8 +278,12 @@ def ease(x):
 
 def make_card(path, width):
     im = Image.open(path).convert("RGB")
-    im = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
-    im = im.filter(ImageFilter.UnsharpMask(radius=1.2, percent=40, threshold=2))
+    target = (width, round(im.height * width / im.width))
+    if width > im.width * 1.3:   # low-res source: upscale in two steps, then crisp up the text
+        mid = (round((im.width + width) / 2), round((im.height + target[1]) / 2))
+        im = im.resize(mid, Image.LANCZOS).filter(ImageFilter.UnsharpMask(radius=1.0, percent=60, threshold=1))
+    im = im.resize(target, Image.LANCZOS)
+    im = im.filter(ImageFilter.UnsharpMask(radius=1.4, percent=70, threshold=2))
     r, pad = 16, 40
     mask = Image.new("L", im.size, 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, im.width - 1, im.height - 1), r, fill=255)
@@ -289,10 +293,12 @@ def make_card(path, width):
     card.putalpha(sh.filter(ImageFilter.GaussianBlur(18)))   # soft drop shadow
     inner = im.convert("RGBA"); inner.putalpha(mask)
     card.alpha_composite(inner, (pad, pad))
-    return layer_to_hlg(np.asarray(card).astype(np.float32) / 255)
+    # brighter than reference white so photos read clean next to the HDR video
+    return layer_to_hlg(np.asarray(card).astype(np.float32) / 255, white=CARD_WHITE)
 
-CARDS = [make_card(BROLL_IMAGES[0], 580), make_card(BROLL_IMAGES[1], 960)]
-CARD_CY = 480   # vertical centre of cards (above the captions at CAP_Y)
+CARD_WHITE = 0.45
+CARDS = [make_card(BROLL_IMAGES[0], 680), make_card(BROLL_IMAGES[1], 1000)]
+CARD_CY = 455   # vertical centre of cards (above the captions at CAP_Y)
 DIM = srgb_to_hlg(np.array([8, 10, 14], np.float32) / 255)
 
 def soft_blur(fr):
@@ -330,9 +336,11 @@ def broll(fr, t):
 
 # ---------------------------------------------------------------- logo
 logo = Image.open(LOGO)
-lw = 150
+lw = 175
 logo_small = logo.resize((lw, round(logo.height * lw / logo.width)), Image.LANCZOS)
-logo_small = layer_to_hlg(np.asarray(logo_small).astype(np.float32) / 255)
+logo_small = np.asarray(logo_small).astype(np.float32) / 255
+logo_small[..., 3] = np.clip(logo_small[..., 3] * 1.25, 0, 1)   # firmer edges on thin strokes
+logo_small = layer_to_hlg(logo_small, white=0.60)
 LOGO_POS = (W - lw - 64, 150)
 
 def over(frame, layer, x, y, alpha=1.0):
@@ -404,7 +412,9 @@ for k, (s0, s1) in enumerate(segs):
                     al = ease((t - n0) / 0.22) * ease((n1 - t) / 0.15)
                     rise = (1 - ease((t - n0) / 0.30)) * 5
                     over(fr, layer, 0, CAP_Y + rise, al)
-            over(fr, logo_small, *LOGO_POS, 0.85 * ease(t / 0.6))
+            # logo steps aside while the photo cards are on screen
+            hide = ease((t - BROLL_START) / 0.4) * ease((BROLL_END - t) / 0.4) if BROLL_START <= t < BROLL_END else 0
+            over(fr, logo_small, *LOGO_POS, ease(t / 0.6) * (1 - hide))
             write(fr)
             last = fr
             out_t += 1 / FPS
@@ -445,7 +455,7 @@ for i in range(n_out):
     t = i / FPS
     m = ease(t / 0.8)
     fr = last * (1 - m) + grey_bg * m
-    over(fr, logo_small, *LOGO_POS, 0.85 * (1 - m))
+    over(fr, logo_small, *LOGO_POS, 1 - m)
     a = ease((t - 0.7) / 0.6)
     sc = 0.97 + 0.03 * a
     c = resize_f(cta, (round(cta.shape[1] * sc), round(cta.shape[0] * sc)))
