@@ -27,18 +27,19 @@ _M709_2020 = np.array([[0.6274, 0.3293, 0.0433],
                        [0.0691, 0.9195, 0.0114],
                        [0.0164, 0.0880, 0.8956]], np.float32)
 
-def srgb_to_hlg(rgb):
-    """rgb: float array [..., 3] in 0..1 sRGB -> HLG BT.2020 signal 0..1."""
+def srgb_to_hlg(rgb, white=0.203):
+    """rgb: float array [..., 3] in 0..1 sRGB -> HLG BT.2020 signal 0..1.
+    white: display luminance of sRGB white, as a fraction of 1000 nits."""
     v = np.clip(rgb, 0, 1)
     lin = np.where(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055) ** 2.4)
     lin = np.clip(lin @ _M709_2020.T, 0, 1)
-    e = (lin * 0.203) ** (1 / 1.2)            # inverse OOTF (1000-nit, gamma 1.2)
+    e = (lin * white) ** (1 / 1.2)            # inverse OOTF (1000-nit, gamma 1.2)
     a, b, c = 0.17883277, 0.28466892, 0.55991073
     return np.where(e <= 1 / 12, np.sqrt(3 * e), a * np.log(np.maximum(12 * e - b, 1e-6)) + c).astype(np.float32)
 
-def layer_to_hlg(rgba):
+def layer_to_hlg(rgba, white=0.203):
     out = rgba.copy()
-    out[..., :3] = srgb_to_hlg(rgba[..., :3])
+    out[..., :3] = srgb_to_hlg(rgba[..., :3], white)
     return out
 
 def resize_f(arr, size, box=None, resample=Image.BICUBIC):
@@ -134,6 +135,7 @@ subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SRC, "-filter_complex", gra
 
 # ---------------------------------------------------------------- caption layers
 CAP_SIZE, CAP_LH = 40, 54
+CAP_WHITE = 0.60
 f_cap = ImageFont.truetype(FONT_DIR + "Inter-Medium.otf", CAP_SIZE)
 
 def render_caption(text):
@@ -192,7 +194,9 @@ def render_caption(text):
         dt.text((x, y), word, font=f_cap, fill=GOLD + (255,) if h else (255, 255, 255, 255))
         if h:
             dt.line((x, y + 50, ul_end, y + 50), fill=GOLD + (190,), width=2)
-    return layer_to_hlg(np.asarray(img).astype(np.float32) / 255)
+    # captions sit on the white shirt (HLG ~0.80-0.89), so their white is lifted to
+    # ~0.92 HLG signal (~600 nits) to read as clean white, not grey
+    return layer_to_hlg(np.asarray(img).astype(np.float32) / 255, white=CAP_WHITE)
 
 cap_events = []
 if not args.no_captions:
@@ -205,7 +209,7 @@ if not args.no_captions:
         else:
             n1 = BODY + 0.25
         cap_events.append((n0, n1, render_caption(text)))
-CAP_Y = 800    # top of caption block: collar / upper-chest area
+CAP_Y = 880    # top of caption block: lower neck / collar line
 
 
 # ---------------------------------------------------------------- b-roll cards
