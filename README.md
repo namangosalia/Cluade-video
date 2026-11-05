@@ -14,3 +14,13 @@ Rebuild: `python3 edit/build.py` (add `--no-captions --out output/clean.mp4` for
 - `video2/output/anginax_why_prevention_9x16.mp4`: final 1080x1920 HDR reel
 - `video2/edit/build.py`: rebuilds it (`python3 video2/edit/build.py`)
 - `video2/edit/captions.py`: trailer captions (word groups + full-screen statements); `video2/edit/trailer_text.py`: their typography; `video2/edit/flow.py`: the five-shot "effort of prevention" sequence; `video2/edit/cine.py`: rendering helpers
+
+## New reels (automatic)
+
+See **`MASTER_PROMPT.md`**. In short:
+
+```
+python3 engine/transcribe.py videos/<slug>          # words.json / words.txt
+python3 engine/autoconfig.py videos/<slug>          # draft config.py (review it)
+python3 engine/reel.py videos/<slug>/config.py      # render the reel
+```
