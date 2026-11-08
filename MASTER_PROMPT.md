@@ -67,6 +67,14 @@ Everything below is the brief Claude follows. It records every decision from the
 - After the last line: a soft grey dissolve and a white **LEARN MORE** pill button, about 2.8 s. Keep it the same in every reel.
 - A teaser or cliffhanger line ("Then what do we do?") becomes the final red statement.
 
+**Other footage (event recordings, LinkedIn/screen recordings, standard colour)**
+- Find the lowest point any burned-in captions or labels reach, and crop a 9:16 window (`CROP`) above them.
+- Anchor the zooms on the speaker's face (`FOCUS`), with deeper close-ups (`FRAMES` up to 1.45).
+- When the speaker stands low in the frame, raise the captions above his head (`CAPTION_BOTTOM`). On bright backgrounds, strengthen the caption shadow (`CAPTION_SHADOW`).
+- A light clean-up grade is allowed for these (`SDR_FILTER`, e.g. a highlight curve to tame projector glare). Never grade Naman's iPhone HDR footage.
+- Add a name title at the start (`INTRO_LABEL`: "NAMAN GOSALIA / Founder, AnginaX · <event>").
+- Cut stutters with `CUT_TIMES`, using the waveform. Always check the cut by transcribing the snippet, because word timestamps around stutters are unreliable.
+
 ## 3. Workflow (Claude)
 
 1. **Set up.** Create `videos/<slug>/raw/` and put the raw files there in speaking order (part1.mp4, part2.mp4…). Put B-roll in `videos/<slug>/broll/` and images in `videos/<slug>/img/`.
