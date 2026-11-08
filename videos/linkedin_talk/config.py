@@ -21,7 +21,7 @@ CAPTION_BOTTOM = 1220              # captions end above his head
 CAPTION_TOP = 240
 INTRO_LABEL = ("NAMAN GOSALIA", "Founder, AnginaX  ·  Health Parliament", 0, 11)
 INTRO_Y = 330
-CUT_TIMES = [(4.99, 5.31)]         # stutter: first "as" in "the world as as much" (checked on the waveform)
+CUT_TIMES = [(5.30, 5.70)]         # stutter: the repeated "as" in "the world as as much" (verified by transcribing the cut)
 PUSH_IN = (173, 185)
 
 GROUPS = [
