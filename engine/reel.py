@@ -36,6 +36,7 @@ CUTAWAYS = C.get("CUTAWAYS", [])
 tt.set_accent(C.get("ACCENT", "red"))
 tt.CAPTION_BOTTOM = C.get("CAPTION_BOTTOM", 1560)
 tt.CAPTION_TOP = C.get("CAPTION_TOP", 210)
+tt.CAPTION_SHADOW = C.get("CAPTION_SHADOW", (10, 1.6, 0.0))
 LOGO = os.path.join(REPO, "assets", "logo_on_dark.png")
 FONT_DIR = "/usr/share/fonts/opentype/inter/"
 W, H, FPS = 1080, 1920, 30
@@ -134,6 +135,8 @@ for q0, q1 in runs:
         cuts.append((c0, c1))
 for wi in C.get("CUT_WORDS", []):                 # stutters / repeated words chosen by the editor
     cuts.append((words[wi][0] - 0.01, words[wi + 1][0] - 0.03))
+for t0_, t1_ in C.get("CUT_TIMES", []):            # exact cuts (raw seconds) when word stamps are imprecise
+    cuts.append((t0_, t1_))
 # filler words ("um", "uh", ...) are cut out as well
 FILLERS = {"um", "umm", "uh", "uhh", "hmm", "erm", "ah", "mm"}
 if C.get("CUT_FILLERS", True):

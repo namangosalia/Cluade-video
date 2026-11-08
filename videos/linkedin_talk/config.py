@@ -13,14 +13,15 @@ END_CARD = "LEARN MORE"
 CROP = (300, 0, 260, 462)          # 9:16 window around the speaker, above the burned-in captions
 FOCUS = (0.63, 0.76)               # his face, as a fraction of the crop
 FRAMES = [(1.00, 1.06), (1.38, 1.30), (1.15, 1.22), (1.45, 1.38), (1.06, 1.00), (1.28, 1.36)]
-SDR_FILTER = "hqdn3d=1.5:1.5:4:4,eq=contrast=1.10:saturation=1.10:gamma=0.97"   # lift the projector glare
+SDR_FILTER = "hqdn3d=1.5:1.5:4:4,curves=all='0/0 0.25/0.18 0.6/0.55 1/0.92',eq=saturation=1.12"   # tame projector glare
+CAPTION_SHADOW = (16, 2.4, 0.9)    # captions sit on the bright projection screen
 SDR_WHITE = 0.45
 SHARPEN = 0.5
 CAPTION_BOTTOM = 1220              # captions end above his head
 CAPTION_TOP = 240
 INTRO_LABEL = ("NAMAN GOSALIA", "Founder, AnginaX  ·  Health Parliament", 0, 11)
 INTRO_Y = 330
-CUT_WORDS = [10]                   # stutter: "the world as as much"
+CUT_TIMES = [(4.99, 5.31)]         # stutter: first "as" in "the world as as much" (checked on the waveform)
 PUSH_IN = (173, 185)
 
 GROUPS = [

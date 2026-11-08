@@ -15,6 +15,7 @@ RED = (226, 44, 40)
 TEXT_WHITE = 0.60        # display level of sRGB white for type (fraction of 1000 nits)
 CAPTION_BOTTOM = 1560    # y where on-speaker caption blocks end (raise it when the speaker sits low in frame)
 CAPTION_TOP = 210        # y of "T" (top) caption blocks
+CAPTION_SHADOW = (10, 1.6, 0.0)   # (wide blur radius, wide strength, tight shadow strength); raise on bright backgrounds
 
 _fc = {}
 
@@ -145,7 +146,16 @@ class Group:
                 rise = (1 - ease((t - tw + 0.04) / 0.28)) * (14 if k else 8)
                 col = CREAM if k else WHITE
                 d.text((lx + x, y0 + ly + rise), self.toks[i][0], font=f, fill=col + (int(255 * a),))
-        return to_hlg_region(with_shadow(img))
+        rad, strength, tight = CAPTION_SHADOW
+        out = with_shadow(img, rad, strength)
+        if tight > 0:                              # extra close shadow so small words read on bright scenes
+            sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            sh.putalpha(img.getchannel("A").filter(ImageFilter.GaussianBlur(2.5))
+                        .point(lambda v: int(min(255, v * tight))))
+            sh.alpha_composite(img)                # text on top of its tight shadow
+            out = with_shadow(img, rad, strength)  # wide soft shadow underneath
+            out.alpha_composite(sh)
+        return to_hlg_region(out)
 
 
 def build_groups(groups, words, T, body):
