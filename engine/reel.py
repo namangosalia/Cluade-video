@@ -34,6 +34,8 @@ OUT = os.path.abspath(args.out) if args.out else P(C.get("OUTPUT", "output/reel_
 GROUPS, STATEMENTS = C.get("GROUPS", []), C.get("STATEMENTS", [])
 CUTAWAYS = C.get("CUTAWAYS", [])
 tt.set_accent(C.get("ACCENT", "red"))
+tt.CAPTION_BOTTOM = C.get("CAPTION_BOTTOM", 1560)
+tt.CAPTION_TOP = C.get("CAPTION_TOP", 210)
 LOGO = os.path.join(REPO, "assets", "logo_on_dark.png")
 FONT_DIR = "/usr/share/fonts/opentype/inter/"
 W, H, FPS = 1080, 1920, 30
@@ -130,6 +132,8 @@ for q0, q1 in runs:
     c0, c1 = q0 + keep * 0.55, q1 - keep * 0.45
     if c1 - c0 > 0.08:
         cuts.append((c0, c1))
+for wi in C.get("CUT_WORDS", []):                 # stutters / repeated words chosen by the editor
+    cuts.append((words[wi][0] - 0.01, words[wi + 1][0] - 0.03))
 # filler words ("um", "uh", ...) are cut out as well
 FILLERS = {"um", "umm", "uh", "uhh", "hmm", "erm", "ah", "mm"}
 if C.get("CUT_FILLERS", True):
@@ -355,11 +359,35 @@ def make_cta(text):
         x += wd + track
     return layer_to_hlg(np.asarray(img).astype(np.float32) / 255)
 
+# ---------------------------------------------------------------- intro title (optional)
+INTRO = C.get("INTRO_LABEL")          # (title, subtitle, word_from, word_to) e.g. speaker name + event
+
+def intro_layer(t):
+    if not INTRO:
+        return None
+    t0, t1 = TW(INTRO[2]) + 0.3, to_new(words[INTRO[3]][0])
+    a = ease((t - t0) / 0.6) * (1 - ease((t - t1 + 0.5) / 0.5))
+    if a <= 0:
+        return None
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    y = C.get("INTRO_Y", 300)
+    d.line((70, y, 70, y + 118), fill=tt.CREAM + (int(255 * a),), width=4)
+    d.text((96, y - 4), INTRO[0], font=tt.anton(64), fill=(255, 255, 255, int(255 * a)))
+    d.text((98, y + 80), INTRO[1], font=tt.inter(30), fill=(235, 235, 235, int(235 * a)))
+    return tt.to_hlg_region(tt.with_shadow(img, 10, 1.4))
+
 # ---------------------------------------------------------------- video
-crop_w = min(SRC_W, round(SRC_H * 9 / 16 / 2) * 2)
-crop = f"crop={crop_w}:{SRC_H}:{(SRC_W - crop_w) // 2}:0," if SRC_W / SRC_H > 9 / 16 + 0.005 else ""
+if C.get("CROP"):                                   # (x, y, w, h) in source pixels, 9:16
+    cx_, cy_, cw_, ch_ = C["CROP"]
+    crop = f"crop={cw_}:{ch_}:{cx_}:{cy_},"
+else:
+    crop_w = min(SRC_W, round(SRC_H * 9 / 16 / 2) * 2)
+    crop = f"crop={crop_w}:{SRC_H}:{(SRC_W - crop_w) // 2}:0," if SRC_W / SRC_H > 9 / 16 + 0.005 else ""
 mat = "bt2020" if HDR_SRC else "bt709"
-vf = (f"{crop}scale={W}:{H}:flags=lanczos,unsharp=5:5:0.3:5:5:0,"
+# SDR footage from other cameras / screen recordings may get a light clean-up (never Naman's HDR selfies)
+pre = (C.get("SDR_FILTER", "") + ",") if (C.get("SDR_FILTER") and not HDR_SRC) else ""
+vf = (f"{crop}{pre}scale={W}:{H}:flags=lanczos,unsharp=5:5:{C.get('SHARPEN', 0.3)}:5:5:0,"
       f"scale=in_color_matrix={mat}:in_range=tv:out_range=pc,format=rgb48le")
 dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", SRC, "-vf", vf, "-r", str(FPS),
                         "-f", "rawvideo", "-pix_fmt", "rgb48le", "-"], stdout=subprocess.PIPE)
@@ -374,8 +402,8 @@ enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_f
                         "-colorspace", "bt2020nc", "-color_range", "tv",
                         "-c:a", "copy", "-movflags", "+faststart", "-shortest", OUT], stdin=subprocess.PIPE)
 
-FOCUS_Y = 0.30
-FRAMES = [(1.00, 1.05), (1.20, 1.15), (1.08, 1.13), (1.26, 1.20), (1.04, 1.00), (1.14, 1.20)]
+FOCUS_X, FOCUS_Y = C.get("FOCUS", (0.5, 0.30))     # zoom anchor (fraction of frame): keep the face in place
+FRAMES = C.get("FRAMES", [(1.00, 1.05), (1.20, 1.15), (1.08, 1.13), (1.26, 1.20), (1.04, 1.00), (1.14, 1.20)])
 PUSH = C.get("PUSH_IN")
 PUSH_FROM, PUSH_TO = (TW(PUSH[0]), to_new(words[PUSH[1] - 1][1]) + 0.3) if PUSH else (1e9, 1e9)
 
@@ -383,7 +411,7 @@ def zoom(fr, z):
     if z <= 1.0005:
         return fr
     cw, ch = W / z, H / z
-    x0, y0 = (W - cw) / 2, (H - ch) * FOCUS_Y
+    x0, y0 = (W - cw) * FOCUS_X, (H - ch) * FOCUS_Y
     return resize_f(fr, (W, H), box=(x0, y0, x0 + cw, y0 + ch))
 
 def write(fr):
@@ -401,7 +429,7 @@ for k, (s0, s1) in enumerate(segs):
             t = out_t
             fr = np.frombuffer(buf, "<u2").reshape(H, W, 3).astype(np.float32) / 65535
             if not HDR_SRC:
-                fr = srgb_to_hlg(fr, white=0.42)
+                fr = srgb_to_hlg(fr, white=C.get("SDR_WHITE", 0.42))
             if PUSH_FROM <= t < PUSH_TO:
                 z = 1.04 + 0.14 * ease((t - PUSH_FROM) / (PUSH_TO - PUSH_FROM))
             else:
@@ -432,6 +460,9 @@ for k, (s0, s1) in enumerate(segs):
                 lay = grp.render(t)
                 if lay:
                     over(fr, *lay)
+            lay = intro_layer(t)
+            if lay:
+                over(fr, *lay)
             over(fr, logo_small, *LOGO_POS, ease(t / 0.6) * (1 - hide))
             write(fr)
             last = fr

@@ -13,6 +13,8 @@ CREAM = (240, 214, 158)
 WHITE = (255, 255, 255)
 RED = (226, 44, 40)
 TEXT_WHITE = 0.60        # display level of sRGB white for type (fraction of 1000 nits)
+CAPTION_BOTTOM = 1560    # y where on-speaker caption blocks end (raise it when the speaker sits low in frame)
+CAPTION_TOP = 210        # y of "T" (top) caption blocks
 
 _fc = {}
 
@@ -125,9 +127,9 @@ class Group:
         img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         if self.pos == "T":
-            y0 = 210
+            y0 = CAPTION_TOP
         else:
-            y0 = 1560 - self.block_h
+            y0 = CAPTION_BOTTOM - self.block_h
         for f, k, ly, lw, words in self.layout:
             if self.pos in ("BL", "T"):
                 lx = 70
@@ -203,8 +205,9 @@ class Statement:
         img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         vis = []
+        fade_end = 1 - ease((t - self.t1 + 0.05) / 0.35)       # whole statement fades out at its end
         for text, style, ti, to in items:
-            a = ease((t - ti + 0.05) / 0.35)
+            a = ease((t - ti + 0.05) / 0.35) * fade_end
             if to is not None:
                 a *= 1 - ease((t - to) / 0.35)
             if a > 0:
