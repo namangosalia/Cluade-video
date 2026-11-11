@@ -86,6 +86,11 @@ Everything below is the brief Claude follows. It records every decision from the
 - Whisper usually doesn't transcribe "ahh/uh". Find them by transcribing each sound island separately, and by looking for over-long word stamps. Cut only what is confirmed on the waveform.
 - **Intro clip:** to open on Naman walking on stage, set `INTRO_CLIP` (file, ambient level, name `label`). The crop tracks him, the name title goes on the walk, and the clip dissolves into the main picture where the speech starts.
 
+**Oratory / speech presentation ("like a great speech over a still")**
+- Photo only, completely static (`FRAMES = [(1.0, 1.0)]`, `PUSH_IN = None`). A fixed headline at the top via `TITLE` (white line + cream line), with `LOGO = False` when asked.
+- Hall resonance goes in `POST_CHAIN`, applied after the cuts. Use a filtered hall *send* under the dry voice (first reflection at 70 ms or later). Never a plain early echo on the whole voice: it smears consonants.
+- Whisper may "hear" a phantom "Thank you" over the silent end card. Check the level there before treating it as real.
+
 ## 3. Workflow (Claude)
 
 1. **Set up.** Create `videos/<slug>/raw/` and put the raw files there in speaking order (part1.mp4, part2.mp4…). Put B-roll in `videos/<slug>/broll/` and images in `videos/<slug>/img/`.

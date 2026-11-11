@@ -199,6 +199,11 @@ graph = ";".join(parts) + ";" + "".join(f"[a{i}]" for i in range(len(segs))) + \
         f"concat=n={len(segs)}:v=0:a=1,apad=whole_dur={TOTAL}[aout]"
 cut = os.path.join(TMP, "cut.wav")
 run(["ffmpeg", "-v", "error", "-y", "-i", voice, "-filter_complex", graph, "-map", "[aout]", "-c:a", "pcm_s24le", cut])
+if C.get("POST_CHAIN"):                            # after the cuts, e.g. hall resonance whose tails must flow over joins
+    cut2 = os.path.join(TMP, "cut_post.wav")
+    run(["ffmpeg", "-v", "error", "-y", "-i", cut, "-af", ",".join(C["POST_CHAIN"]) + f",atrim=0:{TOTAL}",
+         "-c:a", "pcm_s24le", cut2])
+    cut = cut2
 meas = subprocess.run(["ffmpeg", "-hide_banner", "-i", cut, "-af", "loudnorm=I=-14:TP=-1:LRA=7:print_format=json",
                        "-f", "null", "-"], capture_output=True, text=True).stderr
 m = json.loads(meas[meas.rindex("{"):meas.rindex("}") + 1])
@@ -372,6 +377,27 @@ logo_small = np.asarray(logo.resize((lw, round(logo.height * lw / logo.width)), 
 logo_small[..., 3] = np.clip(logo_small[..., 3] * 1.25, 0, 1)
 logo_small = layer_to_hlg(logo_small, white=0.60)
 LOGO_POS = (W - lw - 64, 150)
+SHOW_LOGO = C.get("LOGO", True)
+
+# persistent title (e.g. "The Uncomfortable Truth That Silenced the Room at WHO."): list of (text, style) lines
+def make_title(lines, y):
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    for text, style in lines:
+        if style == "small":
+            f = tt.inter(34, "SemiBold"); col = (240, 240, 240)
+        else:
+            size = 78
+            f = tt.anton(size)
+            while d.textlength(text, font=f) > W - 140:
+                size -= 4; f = tt.anton(size)
+            col = tt.CREAM if style == "accent" else (255, 255, 255)
+        tw_ = d.textlength(text, font=f)
+        d.text(((W - tw_) / 2, y), text, font=f, fill=col + (255,))
+        asc, desc = f.getmetrics()
+        y += (asc + desc) * (1.0 if style == "small" else 0.98)
+    return tt.to_hlg_region(tt.with_shadow(img, 14, 1.8))
+TITLE = make_title(C["TITLE"], C.get("TITLE_Y", 150)) if C.get("TITLE") else None
 
 def make_cta(text):
     f = ImageFont.truetype(FONT_DIR + "Inter-SemiBold.otf", 38)
@@ -483,7 +509,10 @@ def compose(fr, t):
     lay = intro_layer(t)
     if lay:
         over(fr, *lay)
-    over(fr, logo_small, *LOGO_POS, ease(t / 0.6) * (1 - hide))
+    if SHOW_LOGO:
+        over(fr, logo_small, *LOGO_POS, ease(t / 0.6) * (1 - hide))
+    if TITLE:
+        over(fr, *TITLE[:1], TITLE[1], TITLE[2], ease((t - 0.2) / 0.8))
     return fr
 
 def play_intro_clip():
@@ -594,7 +623,10 @@ if OUTRO:
         t = i / FPS
         mm = ease(t / 0.8)
         fr = last * (1 - mm) + grey_bg * mm
-        over(fr, logo_small, *LOGO_POS, 1 - mm)
+        if SHOW_LOGO:
+            over(fr, logo_small, *LOGO_POS, 1 - mm)
+        if TITLE:
+            over(fr, TITLE[0], TITLE[1], TITLE[2], 1 - mm)
         a = ease((t - 0.7) / 0.6)
         sc_ = 0.97 + 0.03 * a
         c = resize_f(cta, (round(cta.shape[1] * sc_), round(cta.shape[0] * sc_)))

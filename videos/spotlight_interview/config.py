@@ -16,11 +16,10 @@ CUT_TIMES = [(12.95, 14.97),        # "experience different, um, uh, difference"
              (27.32, 27.68)]        # "And now no, we know" -> "And now we know" (syllables from the waveform)
 END_HOLD = 1.2                      # the closing question lands, briefly, before the end card
 
-# still image: no cut-to-cut zoom; a very gentle push-in only on the final question
+# still image, completely static
 FRAMES = [(1.0, 1.0)]
 FOCUS = (0.44, 0.42)
-PUSH_IN = (69, 89)
-PUSH_RANGE = (1.0, 1.06)
+PUSH_IN = None                      # no zoom at all
 SDR_WHITE = 0.45
 SHARPEN = 0.0
 
@@ -42,9 +41,15 @@ VOICE_CHAIN = [
 CAPTION_BOTTOM = 1640               # over the dark jacket, below his face
 CAPTION_TOP = 240
 CAPTION_SHADOW = (14, 2.0, 0.6)
-# opens on Naman walking on stage (ambient sound only); the speech starts as the photo appears
-INTRO_CLIP = {"file": "raw/walk.mp4", "ambient_lufs": -30, "white": 0.42, "push": 0.05, "dissolve": 0.6,
-              "label": ("NAMAN GOSALIA", "Founder, AnginaX  ·  Innovator Spotlight"), "label_y": 1420}
+# oratory presentation: photo only, no walk-in, no zoom, no logo; a fixed title at the top
+LOGO = False
+TITLE = [("THE UNCOMFORTABLE TRUTH", "white"), ("THAT SILENCED THE ROOM AT WHO.", "accent")]
+TITLE_Y = 150
+# hall resonance, added after the cuts so its tails flow naturally over every join
+# a filtered hall send under the untouched dry voice (no early slap-back, consonants stay crisp)
+POST_CHAIN = ["asplit=2[dry][wet];[wet]highpass=f=250,lowpass=f=5000,"
+              "aecho=1.0:1.0:70|130|190|260|340|430:0.35|0.28|0.22|0.16|0.11|0.07,volume=0.30[wv];"
+              "[dry][wv]amix=inputs=2:normalize=0,highpass=f=70"]
 
 GROUPS = [
     (2, 10, "A patient walking into [MOUNT ELIZABETH] in Singapore,", "BL"),
