@@ -175,7 +175,10 @@ def to_new(t_orig):
 T = to_new
 TW = lambda i: to_new(words[i][0])                 # new-timeline start of word i
 BODY = sum(s1 - s0 for s0, s1 in segs)
-OUTRO = 2.8 if C.get("END_CARD", "LEARN MORE") else 0.0
+if C.get("END_TITLE"):                              # closing title card on black instead of the Learn More pill
+    OUTRO = C.get("END_TITLE_DUR", 4.0)
+else:
+    OUTRO = 2.8 if C.get("END_CARD", "LEARN MORE") else 0.0
 HOLD = C.get("END_HOLD", 0.0)                   # seconds of silence holding the last frame + statement
 TOTAL = BODY + HOLD + OUTRO
 print(f"segments: {len(segs)}  body {BODY:.2f}s  total {TOTAL:.2f}s (raw {DUR:.2f}s)")
@@ -380,14 +383,14 @@ LOGO_POS = (W - lw - 64, 150)
 SHOW_LOGO = C.get("LOGO", True)
 
 # persistent title (e.g. "The Uncomfortable Truth That Silenced the Room at WHO."): list of (text, style) lines
-def make_title(lines, y):
+def make_title(lines, y, big=78, small=34):
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     for text, style in lines:
         if style == "small":
-            f = tt.inter(34, "SemiBold"); col = (240, 240, 240)
+            f = tt.inter(small, "SemiBold"); col = (240, 240, 240)
         else:
-            size = 78
+            size = big
             f = tt.anton(size)
             while d.textlength(text, font=f) > W - 140:
                 size -= 4; f = tt.anton(size)
@@ -697,7 +700,23 @@ for i in range(round(HOLD * FPS)):               # silent hold so the closing st
     write(fr)
     last = fr
 
-if OUTRO:
+if OUTRO and C.get("END_TITLE"):
+    card = make_title(C["END_TITLE"], C.get("END_TITLE_Y", 830), big=C.get("END_TITLE_SIZE", 104), small=40)
+    BLACK = srgb_to_hlg(np.array([0.02, 0.02, 0.02], np.float32))
+    for i in range(round(OUTRO * FPS)):
+        t = i / FPS
+        mm = ease(t / 0.9)
+        fr = last * (1 - mm) + BLACK * mm
+        if TITLE:
+            over(fr, TITLE[0], TITLE[1], TITLE[2], 1 - mm)
+        lay = audio_vis(BODY + HOLD + t)
+        if lay:
+            over(fr, *lay, 1 - mm)
+        if card:
+            a = ease((t - 0.8) / 0.9) * (1 - ease((t - OUTRO + 0.5) / 0.5))
+            over(fr, card[0], card[1], card[2] + (1 - ease((t - 0.8) / 1.0)) * 16, a)
+        write(fr)
+elif OUTRO:
     cta = make_cta(C.get("END_CARD", "LEARN MORE"))
     GREY = srgb_to_hlg(np.array([0.36, 0.36, 0.37], np.float32))
     g = resize_f(resize_f(last, (18, 32), resample=Image.BILINEAR), (W, H), resample=Image.BICUBIC)

@@ -9,7 +9,10 @@ against Naman's ~145-175 Hz). It ends on his question: the uncomfortable truth.
 SOURCES = ["raw/part1.mp4"]
 OUTPUT = "output/spotlight_interview_9x16.mp4"
 ACCENT = "red"
-END_CARD = "LEARN MORE"
+END_CARD = ""
+# closing title card on black (replaces Learn More)
+END_TITLE = [("THE UNCOMFORTABLE TRUTH", "white"), ("THAT SILENCED THE ROOM AT WHO.", "accent")]
+END_TITLE_DUR = 4.2
 START_WORD = 2                      # drop "So, um," -> opens on "A patient walking into..."
 END_WORD = 88                       # "...low and middle income countries?"
 CUT_TIMES = [(12.95, 14.97),        # "experience different, um, uh, difference" -> "experience difference" (transcription-checked)
@@ -24,6 +27,8 @@ FOCUS = (0.44, 0.42)
 PUSH_IN = None                      # no zoom at all
 SDR_WHITE = 0.45
 SHARPEN = 0.0
+# iconic, archival black & white: monochrome, deeper tones, soft edge fall-off, moving film grain
+SDR_FILTER = "hue=s=0,curves=all='0/0.03 0.25/0.16 0.5/0.41 0.8/0.75 1/0.90',vignette=PI/6,noise=alls=10:allf=t+u"
 
 # smooth, continuous delivery: every hesitation gap (>= 0.16 s) trimmed to a short breath
 MIN_PAUSE = 0.20                    # slightly slower than before: natural breaths, still no hesitation gaps
@@ -45,9 +50,10 @@ CAPTION_TOP = 240
 CAPTION_SHADOW = (14, 2.0, 0.6)
 # oratory presentation: photo only, no walk-in, no zoom, no logo; a fixed title at the top
 LOGO = False
-TITLE = [("THE UNCOMFORTABLE TRUTH", "white"), ("THAT SILENCED THE ROOM AT WHO.", "accent")]
+# speaker identity at the top for the whole video; audio bars beneath it
+TITLE = [("NAMAN GOSALIA", "white"), ("Founder, AnginaX  ·  World Heart Forum", "small")]
 TITLE_Y = 150
-AUDIO_VIS = {"y": 440, "bars": 36, "width": 560, "height": 64}   # audio bars under the title: "audio playing"
+AUDIO_VIS = {"y": 380, "bars": 36, "width": 520, "height": 60}   # audio bars: "an audio clip is playing"
 
 # the places build up as a bold list over the jacket and stay readable for the whole sentence
 LISTS = [{"items": [(9, "SINGAPORE", "Mount Elizabeth"), (13, "DELHI", "AIIMS"), (18, "US", "Mayo Clinic"),
