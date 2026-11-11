@@ -13,7 +13,9 @@ END_CARD = "LEARN MORE"
 START_WORD = 2                      # drop "So, um," -> opens on "A patient walking into..."
 END_WORD = 88                       # "...low and middle income countries?"
 CUT_TIMES = [(12.95, 14.97),        # "experience different, um, uh, difference" -> "experience difference" (transcription-checked)
-             (27.32, 27.68)]        # "And now no, we know" -> "And now we know" (syllables from the waveform)
+             (27.32, 27.68),        # "And now no, we know" -> "And now we know" (syllables from the waveform)
+             (26.30, 31.20)]        # drop "And now we know that AI has capability to fix this implementation
+                                    # problem." (the solution) -> "...routine in operation. What are the biggest..."
 END_HOLD = 1.2                      # the closing question lands, briefly, before the end card
 
 # still image, completely static
@@ -24,9 +26,9 @@ SDR_WHITE = 0.45
 SHARPEN = 0.0
 
 # smooth, continuous delivery: every hesitation gap (>= 0.16 s) trimmed to a short breath
-MIN_PAUSE = 0.16
-PAUSE_KEEP, PAUSE_KEEP_LONG = 0.12, 0.20
-DRAMATIC_AFTER_WORDS = [36, 54, 68]
+MIN_PAUSE = 0.20                    # slightly slower than before: natural breaths, still no hesitation gaps
+PAUSE_KEEP, PAUSE_KEEP_LONG = 0.24, 0.45
+DRAMATIC_AFTER_WORDS = [26, 36, 43, 54]
 
 # cinema / studio voice for a quiet, boomy panel-room recording
 VOICE_CHAIN = [
@@ -45,6 +47,12 @@ CAPTION_SHADOW = (14, 2.0, 0.6)
 LOGO = False
 TITLE = [("THE UNCOMFORTABLE TRUTH", "white"), ("THAT SILENCED THE ROOM AT WHO.", "accent")]
 TITLE_Y = 150
+AUDIO_VIS = {"y": 440, "bars": 36, "width": 560, "height": 64}   # audio bars under the title: "audio playing"
+
+# the places build up as a bold list over the jacket and stay readable for the whole sentence
+LISTS = [{"items": [(9, "SINGAPORE", "Mount Elizabeth"), (13, "DELHI", "AIIMS"), (18, "US", "Mayo Clinic"),
+                    (25, "EAST AFRICA", "Tribal Health Clinic")],
+          "until": 32, "x": 70, "y": 1190, "size": 96, "small_size": 30}]
 # hall resonance, added after the cuts so its tails flow naturally over every join
 # a filtered hall send under the untouched dry voice (no early slap-back, consonants stay crisp)
 POST_CHAIN = ["asplit=2[dry][wet];[wet]highpass=f=250,lowpass=f=5000,"
@@ -52,13 +60,8 @@ POST_CHAIN = ["asplit=2[dry][wet];[wet]highpass=f=250,lowpass=f=5000,"
               "[dry][wv]amix=inputs=2:normalize=0,highpass=f=70"]
 
 GROUPS = [
-    (2, 10, "A patient walking into [MOUNT ELIZABETH] in Singapore,", "BL"),
-    (10, 14, "or [AIIMS] in Delhi,", "BR"),
-    (14, 19, "or [MAYO CLINIC] in the US,", "BL"),
-    (19, 27, "or a [TRIBAL HEALTH CLINIC] in East Africa.", "BR"),
-    (27, 37, "He'll experience [DIFFERENCES] in his healthcare system.", "B"),
-    (55, 62, "And now we know that [AI]", "BL"),
-    (62, 69, "has the capability to fix this [IMPLEMENTATION PROBLEM.]", "BR"),
+    (2, 9, "A patient walking into Mount Elizabeth in", "B"),
+    (32, 37, "a [DIFFERENCE] in his healthcare system.", "B"),
 ]
 
 STATEMENTS = [

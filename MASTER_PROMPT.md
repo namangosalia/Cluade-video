@@ -89,6 +89,9 @@ Everything below is the brief Claude follows. It records every decision from the
 **Oratory / speech presentation ("like a great speech over a still")**
 - Photo only, completely static (`FRAMES = [(1.0, 1.0)]`, `PUSH_IN = None`). A fixed headline at the top via `TITLE` (white line + cream line), with `LOGO = False` when asked.
 - Hall resonance goes in `POST_CHAIN`, applied after the cuts. Use a filtered hall *send* under the dry voice (first reflection at 70 ms or later). Never a plain early echo on the whole voice: it smears consonants.
+- `AUDIO_VIS` draws animated audio bars driven by the edited voice (under the title), to show "an audio clip is playing".
+- Lists of names or places get a `LISTS` overlay. Rows build on their words and stay up for the whole sentence, so viewers can read them; don't flash them by as single caption words.
+- When Naman cuts a "solution" line to keep the reel about the problem, remove the whole sentence with `CUT_TIMES`, choosing join points by transcription.
 - Whisper may "hear" a phantom "Thank you" over the silent end card. Check the level there before treating it as real.
 
 ## 3. Workflow (Claude)

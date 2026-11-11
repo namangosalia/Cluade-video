@@ -399,6 +399,85 @@ def make_title(lines, y):
     return tt.to_hlg_region(tt.with_shadow(img, 14, 1.8))
 TITLE = make_title(C["TITLE"], C.get("TITLE_Y", 150)) if C.get("TITLE") else None
 
+# animated audio bars ("an audio clip is playing"), driven by the edited voice track
+AV = C.get("AUDIO_VIS")       # {"y": centre line, "bars": 36, "width": 640, "height": 70}
+if AV:
+    _raw = subprocess.run(["ffmpeg", "-v", "error", "-i", cut, "-ac", "1", "-ar", "24000", "-f", "f32le", "-"],
+                          capture_output=True, check=True).stdout
+    _au = np.frombuffer(_raw, "<f4")
+    _nb = AV.get("bars", 36)
+    _edges = np.geomspace(90, 7000, _nb + 1)
+    _fq = np.fft.rfftfreq(2048, 1 / 24000)
+    _bidx = [(_fq >= _edges[i]) & (_fq < _edges[i + 1]) for i in range(_nb)]
+    _dbs = []
+    for fi in range(int(TOTAL * FPS) + 2):
+        c_ = int(fi / FPS * 24000)
+        x_ = _au[max(c_ - 1024, 0):c_ + 1024]
+        if len(x_) < 2048:
+            x_ = np.pad(x_, (0, 2048 - len(x_)))
+        X_ = np.abs(np.fft.rfft(x_ * np.hanning(2048)))
+        _dbs.append([20 * np.log10(X_[b_].mean() + 1e-9) for b_ in _bidx])
+    _dbs = np.array(_dbs)
+    _band_hi = np.percentile(_dbs, 97, axis=0)                     # per band: loud speech reaches ~1
+    _band_lo = _band_hi - 38                                       # ~38 dB of visible range
+    _levels, _state = [], np.zeros(_nb)
+    for db_ in _dbs:
+        v_ = np.clip((db_ - _band_lo) / (_band_hi - _band_lo), 0, 1) ** 1.4
+        _state = np.where(v_ > _state, 0.55 * v_ + 0.45 * _state, 0.80 * _state + 0.20 * v_)   # fast rise, slow fall
+        _levels.append(_state.copy())
+
+# building lists: rows appear on their words and stay until a later word (e.g. places named in a sentence)
+LISTS = C.get("LISTS", [])
+
+def list_layers(t):
+    out = []
+    for L in LISTS:
+        t_end = TW(L["until"])
+        a_all = 1 - ease((t - t_end + 0.35) / 0.35)
+        if a_all <= 0:
+            continue
+        img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        fb, fs = tt.anton(L.get("size", 92)), tt.inter(L.get("small_size", 32))
+        y = L.get("y", 1180)
+        drawn = False
+        for wi, big, small in L["items"]:
+            ti = TW(wi)
+            a = ease((t - ti + 0.05) / 0.35) * a_all
+            asc, desc = fb.getmetrics()
+            rise = (1 - ease((t - ti + 0.05) / 0.45)) * 14
+            if a > 0:
+                x = L.get("x", 70)
+                d.text((x, y + rise), big, font=fb, fill=(255, 255, 255, int(255 * a)))
+                if small:
+                    bx = x + d.textlength(big, font=fb) + 18
+                    d.text((bx, y + rise + asc - fs.getmetrics()[0] - 6), small, font=fs, fill=tt.CREAM + (int(255 * a),))
+                drawn = True
+            y += (asc + desc) * 0.92
+        if drawn:
+            rad, strength, tight = tt.CAPTION_SHADOW
+            out.append(tt.to_hlg_region(tt.with_shadow(img, rad, strength)))
+    return [o for o in out if o]
+
+def audio_vis(t):
+    if not AV:
+        return None
+    lv = _levels[min(int(t * FPS), len(_levels) - 1)]
+    nb = len(lv)
+    width, hmax, y0 = AV.get("width", 640), AV.get("height", 70), AV.get("y", 420)
+    bw = width / nb
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    x0 = (W - width) / 2
+    for i, v in enumerate(lv):
+        # gentle bell shape so the centre bars lead, like a classic audio meter
+        shape = 0.55 + 0.45 * np.exp(-((i - (nb - 1) / 2) / (nb / 3.2)) ** 2)
+        h = 4 + hmax * v * shape
+        cx = x0 + (i + 0.5) * bw
+        col = tt.CREAM if abs(i - (nb - 1) / 2) < nb * 0.18 else (255, 255, 255)
+        d.rounded_rectangle((cx - bw * 0.30, y0 - h / 2, cx + bw * 0.30, y0 + h / 2), radius=bw * 0.3, fill=col + (235,))
+    return tt.to_hlg_region(tt.with_shadow(img, 8, 1.4))
+
 def make_cta(text):
     f = ImageFont.truetype(FONT_DIR + "Inter-SemiBold.otf", 38)
     d = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
@@ -506,6 +585,8 @@ def compose(fr, t):
         lay = grp.render(t)
         if lay:
             over(fr, *lay)
+    for lay in (list_layers(t) if g < 0.25 else ()):
+        over(fr, *lay)
     lay = intro_layer(t)
     if lay:
         over(fr, *lay)
@@ -513,6 +594,9 @@ def compose(fr, t):
         over(fr, logo_small, *LOGO_POS, ease(t / 0.6) * (1 - hide))
     if TITLE:
         over(fr, *TITLE[:1], TITLE[1], TITLE[2], ease((t - 0.2) / 0.8))
+    lay = audio_vis(t)
+    if lay:
+        over(fr, *lay, ease((t - 0.2) / 0.8))
     return fr
 
 def play_intro_clip():
@@ -627,6 +711,9 @@ if OUTRO:
             over(fr, logo_small, *LOGO_POS, 1 - mm)
         if TITLE:
             over(fr, TITLE[0], TITLE[1], TITLE[2], 1 - mm)
+        lay = audio_vis(BODY + HOLD + t)
+        if lay:
+            over(fr, *lay, 1 - mm)
         a = ease((t - 0.7) / 0.6)
         sc_ = 0.97 + 0.03 * a
         c = resize_f(cta, (round(cta.shape[1] * sc_), round(cta.shape[0] * sc_)))
