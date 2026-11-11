@@ -103,7 +103,10 @@ a16 = np.frombuffer(wv.readframes(wv.getnframes()), np.int16).astype(np.float32)
 rms = np.array([20 * np.log10(np.sqrt(np.mean(a16[i:i + 400] ** 2)) + 1e-9) for i in range(0, len(a16), 160)])
 DUR = len(a16) / 16000
 runs, s_ = [], None
-for i, q in enumerate(rms < -30.0):
+# pause threshold follows the recording's level (quiet room / panel recordings sit far below -30 dBFS)
+SIL_DB = C.get("SIL_DB", min(-30.0, float(np.percentile(rms[rms > -90], 90)) - 20.0))
+print(f"pause threshold {SIL_DB:.1f} dB")
+for i, q in enumerate(rms < SIL_DB):
     if q and s_ is None:
         s_ = i
     if not q and s_ is not None:
@@ -177,7 +180,7 @@ TOTAL = BODY + OUTRO
 print(f"segments: {len(segs)}  body {BODY:.2f}s  total {TOTAL:.2f}s (raw {DUR:.2f}s)")
 
 # ---------------------------------------------------------------- studio voice
-VOICE_CHAIN = ",".join([
+VOICE_CHAIN = ",".join(C["VOICE_CHAIN"]) if C.get("VOICE_CHAIN") else ",".join([
     "highpass=f=70:poles=2", "afftdn=nr=8:nf=-48:tn=1",
     "equalizer=f=130:t=q:w=0.9:g=1.5", "equalizer=f=520:t=q:w=1.1:g=-3",
     "equalizer=f=2900:t=q:w=0.9:g=6", "equalizer=f=5200:t=q:w=1.0:g=6", "highshelf=f=9000:g=2",
@@ -434,7 +437,8 @@ for k, (s0, s1) in enumerate(segs):
             if not HDR_SRC:
                 fr = srgb_to_hlg(fr, white=C.get("SDR_WHITE", 0.42))
             if PUSH_FROM <= t < PUSH_TO:
-                z = 1.04 + 0.14 * ease((t - PUSH_FROM) / (PUSH_TO - PUSH_FROM))
+                pz0, pz1 = C.get("PUSH_RANGE", (1.04, 1.18))
+                z = pz0 + (pz1 - pz0) * ease((t - PUSH_FROM) / (PUSH_TO - PUSH_FROM))
             else:
                 z0, z1 = FRAMES[k % len(FRAMES)]
                 z = z0 + (z1 - z0) * ease((src_i - f0) / max(f1 - f0, 1))
