@@ -110,7 +110,7 @@ for i, q in enumerate(rms < SIL_DB):
     if q and s_ is None:
         s_ = i
     if not q and s_ is not None:
-        if i - s_ >= 30:
+        if i - s_ >= int(C.get("MIN_PAUSE", 0.30) * 100):
             runs.append((s_ / 100, i / 100))
         s_ = None
 
@@ -206,6 +206,30 @@ ln = (f"loudnorm=I=-14:TP=-1:LRA=7:linear=true:measured_I={m['input_i']}:measure
       f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}")
 audio = os.path.join(TMP, "audio.m4a")
 run(["ffmpeg", "-v", "error", "-y", "-i", cut, "-af", ln, "-ar", "48000", "-c:a", "aac", "-b:a", "256k", audio])
+
+# ---------------------------------------------------------------- intro clip (e.g. Naman walking on stage)
+INTRO_CLIP = C.get("INTRO_CLIP")      # {"file", "trim_start", "trim_end", "ambient_lufs", "label": (title, subtitle)}
+INTRO_DUR = 0.0
+if INTRO_CLIP:
+    ic_path = P(INTRO_CLIP["file"])
+    ic_t0 = INTRO_CLIP.get("trim_start", 0.0)
+    INTRO_DUR = float(probe(ic_path, "stream=duration")["duration"]) - ic_t0 - INTRO_CLIP.get("trim_end", 0.0)
+    INTRO_DUR = int(INTRO_DUR * FPS) / FPS
+    amb = os.path.join(TMP, "intro_amb.wav")
+    if probe(ic_path, "stream=codec_type", "a:0"):
+        af = (f"highpass=f=80,afftdn=nr=10:nf=-50,loudnorm=I={INTRO_CLIP.get('ambient_lufs', -30)}:TP=-8,"
+              f"afade=t=in:d=0.3,afade=t=out:st={max(INTRO_DUR - 0.8, 0)}:d=0.8")
+        run(["ffmpeg", "-v", "error", "-y", "-ss", str(ic_t0), "-t", str(INTRO_DUR), "-i", ic_path, "-vn", "-af", af,
+             "-ac", "2", "-ar", "48000", "-c:a", "pcm_s24le", amb])
+    else:
+        run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", str(INTRO_DUR),
+             "-c:a", "pcm_s24le", amb])
+    full = os.path.join(TMP, "audio_full.m4a")
+    run(["ffmpeg", "-v", "error", "-y", "-i", amb, "-i", audio, "-filter_complex",
+         "[0:a]aresample=48000[x];[1:a]aresample=48000[y];[x][y]concat=n=2:v=0:a=1[a]", "-map", "[a]",
+         "-c:a", "aac", "-b:a", "256k", full])
+    audio = full
+    print(f"intro clip {INTRO_DUR:.2f}s")
 
 # ---------------------------------------------------------------- typography
 cap_groups = tt.build_groups(GROUPS, words, to_new, BODY)
@@ -373,6 +397,14 @@ def make_cta(text):
 # ---------------------------------------------------------------- intro title (optional)
 INTRO = C.get("INTRO_LABEL")          # (title, subtitle, word_from, word_to) e.g. speaker name + event
 
+def label_layer(title, subtitle, a, y):
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.line((70, y, 70, y + 118), fill=tt.CREAM + (int(255 * a),), width=4)
+    d.text((96, y - 4), title, font=tt.anton(64), fill=(255, 255, 255, int(255 * a)))
+    d.text((98, y + 80), subtitle, font=tt.inter(30), fill=(235, 235, 235, int(235 * a)))
+    return tt.to_hlg_region(tt.with_shadow(img, 10, 1.4))
+
 def intro_layer(t):
     if not INTRO:
         return None
@@ -380,13 +412,7 @@ def intro_layer(t):
     a = ease((t - t0) / 0.6) * (1 - ease((t - t1 + 0.5) / 0.5))
     if a <= 0:
         return None
-    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    y = C.get("INTRO_Y", 300)
-    d.line((70, y, 70, y + 118), fill=tt.CREAM + (int(255 * a),), width=4)
-    d.text((96, y - 4), INTRO[0], font=tt.anton(64), fill=(255, 255, 255, int(255 * a)))
-    d.text((98, y + 80), INTRO[1], font=tt.inter(30), fill=(235, 235, 235, int(235 * a)))
-    return tt.to_hlg_region(tt.with_shadow(img, 10, 1.4))
+    return label_layer(INTRO[0], INTRO[1], a, C.get("INTRO_Y", 300))
 
 # ---------------------------------------------------------------- video
 if C.get("CROP"):                                   # (x, y, w, h) in source pixels, 9:16
@@ -459,6 +485,72 @@ def compose(fr, t):
         over(fr, *lay)
     over(fr, logo_small, *LOGO_POS, ease(t / 0.6) * (1 - hide))
     return fr
+
+def play_intro_clip():
+    """Walk-in clip: 9:16 crop that follows the speaker, name title, dissolve into the body's first frame."""
+    ic = INTRO_CLIP
+    info = probe(ic_path, "stream=width,height,color_transfer")
+    iw, ih = int(info["width"]), int(info["height"])
+    hdr = info.get("color_transfer") == "arib-std-b67"
+    # 1) track the speaker: dark suit / hair against the bright stage, smoothed over ~1 s
+    small = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(ic_t0), "-t", str(INTRO_DUR), "-i", ic_path,
+                            "-vf", f"fps={FPS},scale=480:-2,format=rgb24", "-f", "rawvideo", "-"], capture_output=True).stdout
+    sh_ = round(480 * ih / iw / 2) * 2
+    fr_s = np.frombuffer(small, np.uint8).reshape(-1, sh_, 480, 3).astype(np.float32)
+    xs = []
+    for f in fr_s:
+        m_ = (f.mean(2) < 80) & ((f[..., 0] - f[..., 2]) < 20)
+        m_[: sh_ // 7] = False
+        cols = m_.sum(0); cols[cols < 6] = 0
+        xs.append((cols * np.arange(480)).sum() / cols.sum() / 480 if cols.sum() else (xs[-1] if xs else 0.5))
+    xs = np.array(ic.get("x_track") or xs)
+    k_ = max(1, int(FPS))
+    xs = np.convolve(np.pad(xs, k_, mode="edge"), np.ones(2 * k_ + 1) / (2 * k_ + 1), "valid")
+    # 2) body's first frame, for the dissolve into the photo / speaker
+    b0 = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segs[0][0]), "-i", SRC, "-frames:v", "1", "-vf", vf,
+                         "-f", "rawvideo", "-pix_fmt", "rgb48le", "-"], capture_output=True).stdout
+    base0 = np.frombuffer(b0, "<u2").reshape(H, W, 3).astype(np.float32) / 65535
+    if not HDR_SRC:
+        base0 = srgb_to_hlg(base0, white=C.get("SDR_WHITE", 0.42))
+    base0 = zoom(base0, FRAMES[0][0])
+    # 3) frames
+    cw_ = round(ih * 9 / 16)
+    mat_ = "bt2020" if hdr else "bt709"
+    p_ = subprocess.Popen(["ffmpeg", "-v", "error", "-ss", str(ic_t0), "-t", str(INTRO_DUR), "-i", ic_path, "-vf",
+                           f"fps={FPS},scale=in_color_matrix={mat_}:in_range=tv:out_range=pc,format=rgb48le",
+                           "-f", "rawvideo", "-pix_fmt", "rgb48le", "-"], stdout=subprocess.PIPE)
+    n_ = round(INTRO_DUR * FPS)
+    dis = ic.get("dissolve", 0.6)
+    lab = ic.get("label")
+    for i in range(n_):
+        buf = p_.stdout.read(iw * ih * 6)
+        if len(buf) < iw * ih * 6:
+            break
+        t_ = i / FPS
+        f = np.frombuffer(buf, "<u2").reshape(ih, iw, 3).astype(np.float32) / 65535
+        cx = xs[min(i, len(xs) - 1)] * iw
+        x0 = int(min(max(cx - cw_ / 2, 0), iw - cw_))
+        z_ = 1.0 + ic.get("push", 0.05) * (t_ / INTRO_DUR)
+        bw, bh = cw_ / z_, ih / z_
+        fr_ = resize_f(f, (W, H), box=(x0 + (cw_ - bw) / 2, (ih - bh) * 0.35, x0 + (cw_ + bw) / 2, (ih - bh) * 0.35 + bh))
+        if not hdr:
+            fr_ = srgb_to_hlg(fr_, white=ic.get("white", C.get("SDR_WHITE", 0.42)))
+        if t_ < 0.5:
+            fr_ = fr_ * ease(t_ / 0.5)                               # open from black
+        if lab:
+            a_ = ease((t_ - 0.6) / 0.6) * (1 - ease((t_ - (INTRO_DUR - dis - 0.6)) / 0.5))
+            if a_ > 0:
+                lay = label_layer(lab[0], lab[1], a_, ic.get("label_y", 300))
+                if lay:
+                    over(fr_, *lay)
+        m_ = ease((t_ - (INTRO_DUR - dis)) / dis)
+        if m_ > 0:
+            fr_ = fr_ * (1 - m_) + base0 * m_
+        write(fr_)
+    p_.terminate()
+
+if INTRO_CLIP:
+    play_intro_clip()
 
 frame_size = W * H * 3 * 2
 src_i, out_t, last, last_base = 0, 0.0, None, None

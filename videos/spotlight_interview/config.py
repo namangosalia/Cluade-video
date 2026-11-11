@@ -14,7 +14,7 @@ START_WORD = 2                      # drop "So, um," -> opens on "A patient walk
 END_WORD = 88                       # "...low and middle income countries?"
 CUT_TIMES = [(12.95, 14.97),        # "experience different, um, uh, difference" -> "experience difference" (transcription-checked)
              (27.32, 27.68)]        # "And now no, we know" -> "And now we know" (syllables from the waveform)
-END_HOLD = 2.2                      # let the closing question hang in silence before the end card
+END_HOLD = 1.2                      # the closing question lands, briefly, before the end card
 
 # still image: no cut-to-cut zoom; a very gentle push-in only on the final question
 FRAMES = [(1.0, 1.0)]
@@ -24,9 +24,10 @@ PUSH_RANGE = (1.0, 1.06)
 SDR_WHITE = 0.45
 SHARPEN = 0.0
 
-# impact: longer breaths after the key sentences
-PAUSE_KEEP, PAUSE_KEEP_LONG = 0.32, 0.85
-DRAMATIC_AFTER_WORDS = [26, 36, 43, 54, 68]
+# smooth, continuous delivery: every hesitation gap (>= 0.16 s) trimmed to a short breath
+MIN_PAUSE = 0.16
+PAUSE_KEEP, PAUSE_KEEP_LONG = 0.12, 0.20
+DRAMATIC_AFTER_WORDS = [36, 54, 68]
 
 # cinema / studio voice for a quiet, boomy panel-room recording
 VOICE_CHAIN = [
@@ -41,8 +42,9 @@ VOICE_CHAIN = [
 CAPTION_BOTTOM = 1640               # over the dark jacket, below his face
 CAPTION_TOP = 240
 CAPTION_SHADOW = (14, 2.0, 0.6)
-INTRO_LABEL = ("NAMAN GOSALIA", "Founder, AnginaX  ·  Innovator Spotlight", 2, 15)
-INTRO_Y = 230
+# opens on Naman walking on stage (ambient sound only); the speech starts as the photo appears
+INTRO_CLIP = {"file": "raw/walk.mp4", "ambient_lufs": -30, "white": 0.42, "push": 0.05, "dissolve": 0.6,
+              "label": ("NAMAN GOSALIA", "Founder, AnginaX  ·  Innovator Spotlight"), "label_y": 1420}
 
 GROUPS = [
     (2, 10, "A patient walking into [MOUNT ELIZABETH] in Singapore,", "BL"),

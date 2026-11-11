@@ -81,6 +81,11 @@ Everything below is the brief Claude follows. It records every decision from the
 - Quiet or boomy room audio gets a per-video `VOICE_CHAIN` (gain, bass cut, presence lift, compression). The pause threshold adapts to the recording's level automatically.
 - End on his strongest line, and let it land with `END_HOLD` (about 2 s of silence on the final statement) before the end card.
 
+**Smooth delivery (Naman's preference: no gaps or hesitations)**
+- Trim every hesitation gap, not just long ones: `MIN_PAUSE` about 0.16, `PAUSE_KEEP` about 0.12, `PAUSE_KEEP_LONG` about 0.20. After rendering, check that no silence inside the speech exceeds about 0.2 s.
+- Whisper usually doesn't transcribe "ahh/uh". Find them by transcribing each sound island separately, and by looking for over-long word stamps. Cut only what is confirmed on the waveform.
+- **Intro clip:** to open on Naman walking on stage, set `INTRO_CLIP` (file, ambient level, name `label`). The crop tracks him, the name title goes on the walk, and the clip dissolves into the main picture where the speech starts.
+
 ## 3. Workflow (Claude)
 
 1. **Set up.** Create `videos/<slug>/raw/` and put the raw files there in speaking order (part1.mp4, part2.mp4…). Put B-roll in `videos/<slug>/broll/` and images in `videos/<slug>/img/`.
