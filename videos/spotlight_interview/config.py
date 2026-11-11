@@ -12,7 +12,9 @@ ACCENT = "red"
 END_CARD = ""
 # closing title card on black (replaces Learn More)
 END_TITLE = [("THE UNCOMFORTABLE TRUTH", "white"), ("THAT SILENCED THE ROOM AT WHO.", "accent")]
-END_TITLE_DUR = 4.2
+END_TITLE_HOLD = 5.0                # title fully readable for 5 s
+END_CTA = "LEARN MORE"              # then fades into Learn More ...
+END_CTA_DUR = 2.0                   # ... which stays 2 s and ends the video
 START_WORD = 2                      # drop "So, um," -> opens on "A patient walking into..."
 END_WORD = 88                       # "...low and middle income countries?"
 CUT_TIMES = [(12.95, 14.97),        # "experience different, um, uh, difference" -> "experience difference" (transcription-checked)

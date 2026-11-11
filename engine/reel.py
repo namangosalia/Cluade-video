@@ -175,8 +175,13 @@ def to_new(t_orig):
 T = to_new
 TW = lambda i: to_new(words[i][0])                 # new-timeline start of word i
 BODY = sum(s1 - s0 for s0, s1 in segs)
-if C.get("END_TITLE"):                              # closing title card on black instead of the Learn More pill
-    OUTRO = C.get("END_TITLE_DUR", 4.0)
+if C.get("END_TITLE"):                              # closing title card on black (optionally followed by a CTA)
+    # black fade + title fade-in (1.7 s), title fully readable for END_TITLE_HOLD, then optional CTA
+    _hold = C.get("END_TITLE_HOLD")
+    if _hold is not None:
+        OUTRO = 1.7 + _hold + (0.5 + C.get("END_CTA_DUR", 2.0) if C.get("END_CTA") else 0.5)
+    else:
+        OUTRO = C.get("END_TITLE_DUR", 4.0)
 else:
     OUTRO = 2.8 if C.get("END_CARD", "LEARN MORE") else 0.0
 HOLD = C.get("END_HOLD", 0.0)                   # seconds of silence holding the last frame + statement
@@ -702,6 +707,7 @@ for i in range(round(HOLD * FPS)):               # silent hold so the closing st
 
 if OUTRO and C.get("END_TITLE"):
     card = make_title(C["END_TITLE"], C.get("END_TITLE_Y", 830), big=C.get("END_TITLE_SIZE", 104), small=40)
+    end_cta = make_cta(C["END_CTA"]) if C.get("END_CTA") else None
     BLACK = srgb_to_hlg(np.array([0.02, 0.02, 0.02], np.float32))
     for i in range(round(OUTRO * FPS)):
         t = i / FPS
@@ -712,9 +718,17 @@ if OUTRO and C.get("END_TITLE"):
         lay = audio_vis(BODY + HOLD + t)
         if lay:
             over(fr, *lay, 1 - mm)
+        t_out = (1.7 + C["END_TITLE_HOLD"]) if C.get("END_TITLE_HOLD") is not None else OUTRO - 0.5
         if card:
-            a = ease((t - 0.8) / 0.9) * (1 - ease((t - OUTRO + 0.5) / 0.5))
-            over(fr, card[0], card[1], card[2] + (1 - ease((t - 0.8) / 1.0)) * 16, a)
+            a = ease((t - 0.8) / 0.9) * (1 - ease((t - t_out) / 0.5))
+            if a > 0:
+                over(fr, card[0], card[1], card[2] + (1 - ease((t - 0.8) / 1.0)) * 16, a)
+        if C.get("END_CTA"):
+            a2 = ease((t - t_out) / 0.5)
+            if a2 > 0:
+                sc_ = 0.97 + 0.03 * a2
+                c = resize_f(end_cta, (round(end_cta.shape[1] * sc_), round(end_cta.shape[0] * sc_)))
+                over(fr, c, (W - c.shape[1]) / 2, (H - c.shape[0]) / 2, a2)
         write(fr)
 elif OUTRO:
     cta = make_cta(C.get("END_CARD", "LEARN MORE"))
