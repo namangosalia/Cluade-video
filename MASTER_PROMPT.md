@@ -75,6 +75,12 @@ Everything below is the brief Claude follows. It records every decision from the
 - Add a name title at the start (`INTRO_LABEL`: "NAMAN GOSALIA / Founder, AnginaX · <event>").
 - Cut stutters with `CUT_TIMES`, using the waveform. Always check the cut by transcribing the snippet, because word timestamps around stutters are unreliable.
 
+**Photo + audio (no video)**
+- Crop the photo to 9:16 at full quality and hold it static under the audio (`raw/part1.mp4`, made with ffmpeg `-loop 1`). Use `FRAMES = [(1.0, 1.0)]`, with only a very gentle `PUSH_IN` (`PUSH_RANGE` about 1.00–1.06) on the closing line.
+- Panel recordings can contain several voices. Use only Naman's part: check the speaker by pitch, and cut with `START_WORD`/`END_WORD`.
+- Quiet or boomy room audio gets a per-video `VOICE_CHAIN` (gain, bass cut, presence lift, compression). The pause threshold adapts to the recording's level automatically.
+- End on his strongest line, and let it land with `END_HOLD` (about 2 s of silence on the final statement) before the end card.
+
 ## 3. Workflow (Claude)
 
 1. **Set up.** Create `videos/<slug>/raw/` and put the raw files there in speaking order (part1.mp4, part2.mp4…). Put B-roll in `videos/<slug>/broll/` and images in `videos/<slug>/img/`.

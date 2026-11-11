@@ -12,7 +12,9 @@ ACCENT = "red"
 END_CARD = "LEARN MORE"
 START_WORD = 2                      # drop "So, um," -> opens on "A patient walking into..."
 END_WORD = 88                       # "...low and middle income countries?"
-CUT_TIMES = [(12.95, 14.97)]        # "experience different, um, uh, difference" -> "experience difference" (transcription-checked)
+CUT_TIMES = [(12.95, 14.97),        # "experience different, um, uh, difference" -> "experience difference" (transcription-checked)
+             (27.32, 27.68)]        # "And now no, we know" -> "And now we know" (syllables from the waveform)
+END_HOLD = 2.2                      # let the closing question hang in silence before the end card
 
 # still image: no cut-to-cut zoom; a very gentle push-in only on the final question
 FRAMES = [(1.0, 1.0)]

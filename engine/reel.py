@@ -176,7 +176,8 @@ T = to_new
 TW = lambda i: to_new(words[i][0])                 # new-timeline start of word i
 BODY = sum(s1 - s0 for s0, s1 in segs)
 OUTRO = 2.8 if C.get("END_CARD", "LEARN MORE") else 0.0
-TOTAL = BODY + OUTRO
+HOLD = C.get("END_HOLD", 0.0)                   # seconds of silence holding the last frame + statement
+TOTAL = BODY + HOLD + OUTRO
 print(f"segments: {len(segs)}  body {BODY:.2f}s  total {TOTAL:.2f}s (raw {DUR:.2f}s)")
 
 # ---------------------------------------------------------------- studio voice
@@ -214,6 +215,10 @@ for i0, i1, lines, kind in STATEMENTS:
     if kind == "sequence":
         t1 += 1.0                                   # let the final number land
     statements.append(tt.Statement(lines, [TW(wi) for _, _, wi in lines], t0, t1, kind))
+if HOLD:
+    for st in statements:
+        if st.t1 >= BODY - 0.8:
+            st.t1 = BODY + HOLD - 0.1
 for st in statements:
     print(f"statement {st.kind:8s} {st.t0:6.2f}-{st.t1:6.2f}s  {st.lines[0][0] if st.lines else ''}")
 
@@ -423,8 +428,40 @@ def zoom(fr, z):
 def write(fr):
     enc.stdin.write((np.clip(fr, 0, 1) * 65535 + 0.5).astype("<u2").tobytes())
 
+def compose(fr, t):
+    """Cutaways, statements, captions, intro title and logo over one speaker frame."""
+    act = []
+    for a_, b_, fn in REPLACE:
+        if a_ <= t < b_:
+            act.append((ease((t - a_) / DISSOLVE) * ease((b_ - t) / DISSOLVE), fn(t - a_)))
+    if act:
+        tot = sum(wg for wg, _ in act)
+        fr = fr * (1 - min(tot, 1.0)) + sum(wg * f_ for wg, f_ in act) / tot * min(tot, 1.0)
+    hide = 0.0
+    for a_, b_, fn in OVERLAY:
+        if a_ <= t < b_:
+            fr = fn(fr, t - a_)
+            hide = max(hide, ease((t - a_) / 0.4) * ease((b_ - t) / 0.4))
+    g = gray_amount(t)
+    if g > 0:
+        Y = (fr @ np.array([0.2627, 0.6780, 0.0593], np.float32))[..., None]
+        fr = (fr * (1 - 0.90 * g) + Y * 0.90 * g) * (1 - 0.50 * g)
+    for st in statements:
+        lay = st.render(t)
+        if lay:
+            over(fr, *lay)
+    for grp in (cap_groups if g < 0.25 else ()):
+        lay = grp.render(t)
+        if lay:
+            over(fr, *lay)
+    lay = intro_layer(t)
+    if lay:
+        over(fr, *lay)
+    over(fr, logo_small, *LOGO_POS, ease(t / 0.6) * (1 - hide))
+    return fr
+
 frame_size = W * H * 3 * 2
-src_i, out_t, last = 0, 0.0, None
+src_i, out_t, last, last_base = 0, 0.0, None, None
 for k, (s0, s1) in enumerate(segs):
     f0, f1 = round(s0 * FPS), round(s1 * FPS)
     while src_i < f1:
@@ -443,38 +480,17 @@ for k, (s0, s1) in enumerate(segs):
                 z0, z1 = FRAMES[k % len(FRAMES)]
                 z = z0 + (z1 - z0) * ease((src_i - f0) / max(f1 - f0, 1))
             fr = zoom(fr, z)
-            act = []
-            for a_, b_, fn in REPLACE:
-                if a_ <= t < b_:
-                    act.append((ease((t - a_) / DISSOLVE) * ease((b_ - t) / DISSOLVE), fn(t - a_)))
-            if act:
-                tot = sum(wg for wg, _ in act)
-                fr = fr * (1 - min(tot, 1.0)) + sum(wg * f_ for wg, f_ in act) / tot * min(tot, 1.0)
-            hide = 0.0
-            for a_, b_, fn in OVERLAY:
-                if a_ <= t < b_:
-                    fr = fn(fr, t - a_)
-                    hide = max(hide, ease((t - a_) / 0.4) * ease((b_ - t) / 0.4))
-            g = gray_amount(t)
-            if g > 0:
-                Y = (fr @ np.array([0.2627, 0.6780, 0.0593], np.float32))[..., None]
-                fr = (fr * (1 - 0.90 * g) + Y * 0.90 * g) * (1 - 0.50 * g)
-            for st in statements:
-                lay = st.render(t)
-                if lay:
-                    over(fr, *lay)
-            for grp in (cap_groups if g < 0.25 else ()):
-                lay = grp.render(t)
-                if lay:
-                    over(fr, *lay)
-            lay = intro_layer(t)
-            if lay:
-                over(fr, *lay)
-            over(fr, logo_small, *LOGO_POS, ease(t / 0.6) * (1 - hide))
+            last_base = fr.copy()
+            fr = compose(fr, t)
             write(fr)
             last = fr
             out_t += 1 / FPS
         src_i += 1
+
+for i in range(round(HOLD * FPS)):               # silent hold so the closing statement can land
+    fr = compose(last_base.copy(), BODY + i / FPS)
+    write(fr)
+    last = fr
 
 if OUTRO:
     cta = make_cta(C.get("END_CARD", "LEARN MORE"))
