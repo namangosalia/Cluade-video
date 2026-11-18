@@ -34,3 +34,8 @@ PARTICLES = 0.7
 GRAIN = 3.5
 TEXT_Y = 1470
 TEXT_SHADE = 0.55
+
+# To use the original smooth videos (e.g. MP4s exported from Google Flow) instead of the GIF keyframes,
+# put them in videos/air_pollution/clips/ and replace each scene's "frames"/"method" with:
+#   "video": "clips/01_woman_window.mp4", "slow": 1.6, "start": 0.0
+# (slow = slow-motion factor; in-between frames are synthesised from the real motion).

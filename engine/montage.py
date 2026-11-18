@@ -33,6 +33,18 @@ def font(kind, size):
 
 # ------------------------------------------------------------------ scene clips (keyframes -> smooth 30 fps)
 def build_clip(k, sc):
+    if sc.get("video"):
+        # real footage (e.g. a Google Flow / Veo MP4): slow it down, synthesise the in-between frames
+        # from genuine motion (smooth slow motion), square-crop for the 9:16 framing step
+        out = os.path.join(TMP, f"scene{k}.mp4")
+        slow = sc.get("slow", 1.6)
+        vf = (f"setpts={slow}*PTS,minterpolate=fps={FPS}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,"
+              "scale=1016:1016:force_original_aspect_ratio=increase:flags=lanczos,crop=1016:1016,"
+              f"tpad=stop_mode=clone:stop_duration={sc['dur']}")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(sc.get("start", 0)), "-i", P(sc["video"]), "-an",
+                        "-vf", vf, "-t", str(sc["dur"]), "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv444p", out],
+                       check=True)
+        return out
     frames = sorted(glob.glob(P(sc["frames"])))
     n = len(frames); dur = sc["dur"]
     hold = dur / n                                            # seconds per keyframe
