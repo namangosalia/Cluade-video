@@ -23,6 +23,7 @@ FONT_HL = "/usr/share/fonts/opentype/inter/Inter-SemiBold.otf"
 SIZE = 60
 AMBER = (150, 200, 255)     # {...} highlight: soft sky blue
 RED = (96, 160, 255)        # [...] highlight: deeper blue (heart words)
+CRIMSON = (236, 84, 84)     # <...> highlight: red
 WHITE = (255, 255, 255)
 _fc = {}
 def fnt(path, size):
@@ -34,19 +35,20 @@ def ease(x):
     x = min(max(x, 0.0), 1.0); return x * x * (3 - 2 * x)
 
 # ------------------------------------------------------------------ script: (start, end, text); {word} amber, [word] red
+# {..} soft blue, [..] deep blue, <..> red; 4th field: slow zoom-in on that line
 CAPS = [
-    (0.85, 3.85, "Everyone Talks About {Air Pollution.}"),
-    (3.95, 6.75, "And What It Does To Our {Lungs.}"),
-    (6.85, 9.65, "But What Can We Do About It?"),
-    (9.75, 13.75, "The Fact: Air Pollution Also Harms Our [Hearts.]"),
-    (13.85, 17.95, "It Can Increase The Risk Of [Heart Attacks] And [Strokes]"),
-    (18.05, 22.05, "Especially With {Diabetes} Or {High Blood Pressure.}"),
-    (22.15, 25.25, "We Can't Fix The Air {Overnight.}"),
-    (25.35, 29.55, "But We Can Find Out Where Our [Heart Health] Stands"),
-    (29.65, 32.15, "[Today.]"),
-    (32.35, 36.35, "Learn More."),
+    (0.85, 3.85, "Everyone Talks About {Air Pollution.}", False),
+    (3.95, 6.75, "And What It Does To Our {Lungs.}", False),
+    (6.85, 9.65, "But What Can We Do About It?", False),
+    (9.75, 13.75, "<The Fact:> Air Pollution Also Harms Our [Hearts.]", False),
+    (13.85, 17.95, "It Can Increase The Risk Of <Heart Attacks> And <Strokes>", False),
+    (18.05, 22.05, "Especially With {Diabetes} Or {High Blood Pressure.}", False),
+    (22.15, 25.25, "We <Can't> Fix The Air {Overnight.}", False),
+    (25.35, 30.55, "But We {Can} Find Out [Where Our Heart Health Stands]", True),   # main CTA line, 1 s longer
+    (30.65, 33.15, "[Today!]", True),
 ]
-TOTAL = 36.6
+CTA_START = 33.25         # original ending: soft grey + white "LEARN MORE" pill card
+TOTAL = 37.6
 CLIP_END = 8.0            # 2 s at 1x + 3 s at 0.5x
 SKY_IN = 7.2              # dissolve into the skyline starts
 
@@ -56,8 +58,9 @@ def tokens(text):
         w = raw
         if w.startswith("{"): mode, w = AMBER, w[1:]
         elif w.startswith("["): mode, w = RED, w[1:]
-        end = w.endswith(("}", "]")) or w.endswith(("}.", "].", "},", "],"))
-        w = w.replace("}", "").replace("]", "")
+        elif w.startswith("<"): mode, w = CRIMSON, w[1:]
+        end = any(c in w for c in "}]>")
+        w = w.replace("}", "").replace("]", "").replace(">", "")
         out.append((w, mode or WHITE))
         if end: mode = None
     return out
@@ -140,7 +143,7 @@ mix = rum * 0.10 * np.clip((tt - 6.5) / 2.0, 0, 1)
 o = np.zeros(n, np.float32); o[:min(n, len(orig))] = orig[:n] * 1.6
 o *= np.clip((CLIP_END + 0.6 - tt) / 1.6, 0, 1)            # street sound fades as the skyline takes over
 mix += o
-for (s0, s1, text) in CAPS:                                  # heartbeat under the heart lines
+for (s0, s1, text, _) in CAPS:                               # heartbeat under the heart lines
     if "Heart" in text or "Today" in text:
         b = s0 + 0.2
         while b < s1 - 0.2:
@@ -155,6 +158,30 @@ aud = os.path.join(TMP, "sound.wav")
 with wave.open(aud, "wb") as wf:
     wf.setnchannels(2); wf.setsampwidth(2); wf.setframerate(sr)
     wf.writeframes((np.clip(np.stack([mix, mix], 1), -1, 1) * 32767 * 0.9).astype("<i2").tobytes())
+
+# ------------------------------------------------------------------ Learn More card (same as the earlier reels)
+def make_cta(text="LEARN MORE"):
+    f = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-SemiBold.otf", 38)
+    d = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    track = 6
+    widths = [d.textlength(ch, font=f) for ch in text]
+    tw = sum(widths) + track * (len(text) - 1)
+    pw, ph, pad = int(tw + 2 * 70), 104, 30
+    img = Image.new("RGBA", (pw + 2 * pad, ph + 2 * pad), (0, 0, 0, 0))
+    sh = Image.new("L", img.size, 0)
+    ImageDraw.Draw(sh).rounded_rectangle((pad, pad + 8, pad + pw, pad + ph + 8), ph // 2, fill=110)
+    img.putalpha(sh.filter(ImageFilter.GaussianBlur(14)))
+    dr = ImageDraw.Draw(img)
+    dr.rounded_rectangle((pad, pad, pad + pw, pad + ph), ph // 2, fill=(255, 255, 255, 255))
+    x = pad + (pw - tw) / 2
+    asc, desc = f.getmetrics()
+    y = pad + (ph - (asc + desc)) / 2 + 2
+    for ch, wd in zip(text, widths):
+        dr.text((x, y), ch, font=f, fill=(34, 36, 40, 255))
+        x += wd + track
+    return img
+CTA = make_cta()
+GREY_BG = None
 
 # ------------------------------------------------------------------ render
 enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
@@ -172,11 +199,27 @@ for fi in range(round(TOTAL * FPS)):
         m = ease((t - SKY_IN) / 1.4)
         fr = fr * (1 - m) + sky_frame(t) * m
     fr = fr * VIG * BAND
-    for s0, s1, text in CAPS:
+    if t >= CTA_START:                                          # original Learn More ending
+        mm = ease((t - CTA_START) / 0.8)
+        if GREY_BG is None:
+            g_ = Image.fromarray(np.clip(fr, 0, 255).astype(np.uint8)).resize((18, 32), Image.BILINEAR).resize((W, H), Image.BICUBIC)
+            lum = (np.asarray(g_).astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32))[..., None]
+            GREY_BG = np.array([92, 92, 94], np.float32) * 0.85 + lum * 0.15
+        fr = fr * (1 - mm) + GREY_BG * mm
+        a = ease((t - CTA_START - 0.7) / 0.6)
+        if a > 0:
+            sc_ = 0.97 + 0.03 * a
+            c = CTA.resize((round(CTA.width * sc_), round(CTA.height * sc_)), Image.LANCZOS)
+            ca = np.asarray(c).astype(np.float32) / 255
+            x0, y0 = (W - c.width) // 2, (H - c.height) // 2
+            al = ca[..., 3:4] * a
+            fr[y0:y0 + c.height, x0:x0 + c.width] = fr[y0:y0 + c.height, x0:x0 + c.width] * (1 - al) + ca[..., :3] * 255 * al
+    for s0, s1, text, zoom in CAPS:
         if s0 - 0.05 <= t < s1:
-            hold = text.startswith("Learn")
-            a = ease((t - s0) / 0.35) * (1.0 if hold else 1 - ease((t - (s1 - 0.3)) / 0.3))
-            L = caption_layer(text, a, 1.25 if text in ("[Today.]", "Learn More.") else 1.0)
+            a = ease((t - s0) / 0.35) * (1 - ease((t - (s1 - 0.3)) / 0.3))
+            base = 1.25 if text == "[Today!]" else 1.0
+            sc = base * (1 + 0.08 * ease((t - s0) / (s1 - s0))) if zoom else base    # slow, slight zoom-in
+            L = caption_layer(text, a, sc)
             fr = fr * (1 - L[..., 3:4]) + L[..., :3] * 255 * L[..., 3:4]
     g = np.random.default_rng(fi).standard_normal((H // 2, W // 2)).astype(np.float32) * 3.0
     fr = fr + np.repeat(np.repeat(g, 2, 0), 2, 1)[..., None]
