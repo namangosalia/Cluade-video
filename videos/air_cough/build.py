@@ -105,9 +105,8 @@ def caption_layer(text, a, size_scale=1.0, cy=1400):
 # ------------------------------------------------------------------ footage: 1x then smooth half-speed slow motion
 src = os.path.join(HERE, "raw", "cough.mp4")
 clip = os.path.join(TMP, "clip_9x16.mp4")
-# original full frame (no zoom), fitted to the width and centred, over a soft blurred, darkened fill of itself
-crop = ("split[fg][bg];[bg]scale=-2:1920,crop=1080:1920,boxblur=40:3,eq=brightness=-0.10:saturation=0.8[bgb];"
-        "[fg]scale=1080:-2:flags=lanczos,unsharp=5:5:0.4:5:5:0[fgs];[bgb][fgs]overlay=0:(H-h)/2-120")
+# original full frame (no zoom), fitted to the width on plain black (cinematic letterbox), captions below it
+crop = "scale=1080:-2:flags=lanczos,unsharp=5:5:0.4:5:5:0,pad=1080:1920:0:(oh-ih)/2-120:black"
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-filter_complex",
                 f"[0:v]trim=0:2,setpts=PTS-STARTPTS,fps={FPS}[a];"
                 f"[0:v]trim=2:5,setpts=2*(PTS-STARTPTS),minterpolate=fps={FPS}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1[b];"
