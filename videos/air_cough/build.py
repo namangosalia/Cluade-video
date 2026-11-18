@@ -41,11 +41,15 @@ CAPS = [
     (3.95, 6.75, "And What It Does To Our {Lungs.}", False),
     (6.85, 9.65, "But What Can We Do About It?", False),
     (9.75, 13.75, "<The Fact:> Air Pollution Also Harms Our [Hearts.]", False),
-    (13.85, 17.95, "It Can Increase The Risk Of <Heart Attacks> And <Strokes>", False),
-    (18.05, 22.05, "Especially With {Diabetes} Or {High Blood Pressure.}", False),
-    (22.15, 25.25, "We <Can't> Fix The Air {Overnight.}", False),
-    (25.35, 30.55, "But We {Can} Find Out [Where Our Heart Health Stands]", True),   # main CTA line, 1 s longer
     (30.65, 33.15, "[Today!]", True),
+]
+# paired statements: the first moves up when the second appears beneath it; both stay in one frame
+# (t_first, t_second, t_end, first, second, zoom_second)
+PAIRS = [
+    (13.85, 18.05, 22.05, "It Can Increase The Risk Of <Heart Attacks> And <Strokes>",
+     "Especially With <Diabetes> Or <High Blood Pressure.>", False),
+    (22.15, 25.35, 30.55, "We <Can't> Fix The Air {Overnight.}",
+     "But We {Can} Find Out Where [Our Heart Health Stands]", True),            # main CTA line, 1 s longer
 ]
 CTA_START = 33.25         # original ending: soft grey + white "LEARN MORE" pill card
 TOTAL = 37.6
@@ -65,7 +69,15 @@ def tokens(text):
         if end: mode = None
     return out
 
-def caption_layer(text, a, size_scale=1.0):
+def block_h(text, size_scale=1.0):
+    sz = int(SIZE * size_scale); f = fnt(FONT_BODY, sz); fh = fnt(FONT_HL, sz)
+    fo = lambda col: f if col == WHITE else fh
+    d = ImageDraw.Draw(Image.new("RGBA", (1, 1))); toks = tokens(text); sp = d.textlength(" ", font=f)
+    tw_ = sum(d.textlength(x, font=fo(c)) for x, c in toks) + sp * (len(toks) - 1)
+    asc, desc = f.getmetrics()
+    return (asc + desc) * 1.12 * (1 if tw_ <= 860 else 2)
+
+def caption_layer(text, a, size_scale=1.0, cy=1400):
     sz = int(SIZE * size_scale)
     f = fnt(FONT_BODY, sz); fh = fnt(FONT_HL, sz)
     fo = lambda col: f if col == WHITE else fh
@@ -78,7 +90,7 @@ def caption_layer(text, a, size_scale=1.0):
         best = min(range(1, len(toks)), key=lambda i: max(tw_(toks[:i]), tw_(toks[i:])))
         lines = [toks[:best], toks[best:]]
     asc, desc = f.getmetrics(); lh = (asc + desc) * 1.12
-    y = 1400 - lh * len(lines) / 2
+    y = cy - lh * len(lines) / 2
     for line in lines:
         x = (W - tw_(line)) / 2
         for word, col in line:
@@ -143,7 +155,7 @@ mix = rum * 0.10 * np.clip((tt - 6.5) / 2.0, 0, 1)
 o = np.zeros(n, np.float32); o[:min(n, len(orig))] = orig[:n] * 1.6
 o *= np.clip((CLIP_END + 0.6 - tt) / 1.6, 0, 1)            # street sound fades as the skyline takes over
 mix += o
-for (s0, s1, text, _) in CAPS:                               # heartbeat under the heart lines
+for (s0, s1, text, _) in CAPS + [(p_[1], p_[2], p_[4], 0) for p_ in PAIRS] + [(p_[0], p_[1], p_[3], 0) for p_ in PAIRS]:
     if "Heart" in text or "Today" in text:
         b = s0 + 0.2
         while b < s1 - 0.2:
@@ -214,6 +226,19 @@ for fi in range(round(TOTAL * FPS)):
             x0, y0 = (W - c.width) // 2, (H - c.height) // 2
             al = ca[..., 3:4] * a
             fr[y0:y0 + c.height, x0:x0 + c.width] = fr[y0:y0 + c.height, x0:x0 + c.width] * (1 - al) + ca[..., :3] * 255 * al
+    for (ta, tb, te, txa, txb, zb) in PAIRS:
+        if ta - 0.05 <= t < te:
+            out_a = 1 - ease((t - (te - 0.3)) / 0.3)
+            scb = (1 + 0.08 * ease((t - tb) / (te - tb))) if zb else 1.0
+            ha, hb, gap = block_h(txa), block_h(txb, scb), 36
+            k = ease((t - tb) / 0.6)                                # first line glides up as the second arrives
+            ya = 1400 + k * ((-(ha + gap + hb) / 2 + ha / 2))
+            La = caption_layer(txa, ease((t - ta) / 0.35) * out_a, 1.0, ya)
+            fr = fr * (1 - La[..., 3:4]) + La[..., :3] * 255 * La[..., 3:4]
+            if t >= tb - 0.05:
+                yb = 1400 + (ha + gap + hb) / 2 - hb / 2
+                Lb = caption_layer(txb, ease((t - tb - 0.15) / 0.45) * out_a, scb, yb)
+                fr = fr * (1 - Lb[..., 3:4]) + Lb[..., :3] * 255 * Lb[..., 3:4]
     for s0, s1, text, zoom in CAPS:
         if s0 - 0.05 <= t < s1:
             a = ease((t - s0) / 0.35) * (1 - ease((t - (s1 - 0.3)) / 0.3))
