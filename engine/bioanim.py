@@ -522,7 +522,7 @@ with wave.open(aud, "wb") as wf:
     wf.writeframes((np.clip(np.stack([mix, mix], 1), -1, 1) * 32767 * 0.8).astype("<i2").tobytes())
 
 enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
-                        "-i", "-", "-i", aud, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "slow", "-crf", "17",
+                        "-i", "-", "-i", aud, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-maxrate", "12M", "-bufsize", "24M",
                         "-pix_fmt", "yuv420p", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                         "-c:a", "aac", "-b:a", "192k", "-af", "loudnorm=I=-20:TP=-2", "-movflags", "+faststart",
                         "-shortest", OUT], stdin=subprocess.PIPE)
