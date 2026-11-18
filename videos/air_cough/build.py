@@ -17,8 +17,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 W, H, FPS = 1080, 1920, 30
 TMP = os.path.join(HERE, ".tmp"); os.makedirs(TMP, exist_ok=True)
 OUT = os.path.join(HERE, "output", "air_pollution_cough_9x16.mp4"); os.makedirs(os.path.dirname(OUT), exist_ok=True)
-F_BOLD = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-Bold.otf", 62)
-AMBER, RED, WHITE = (255, 186, 72), (255, 84, 72), (255, 255, 255)
+# elegant caption type: white Inter Medium, highlights in soft blues (SemiBold); swap the files to change font
+FONT_BODY = "/usr/share/fonts/opentype/inter/Inter-Medium.otf"
+FONT_HL = "/usr/share/fonts/opentype/inter/Inter-SemiBold.otf"
+SIZE = 60
+AMBER = (150, 200, 255)     # {...} highlight: soft sky blue
+RED = (96, 160, 255)        # [...] highlight: deeper blue (heart words)
+WHITE = (255, 255, 255)
+_fc = {}
+def fnt(path, size):
+    if (path, size) not in _fc:
+        _fc[(path, size)] = ImageFont.truetype(path, size)
+    return _fc[(path, size)]
 
 def ease(x):
     x = min(max(x, 0.0), 1.0); return x * x * (3 - 2 * x)
@@ -53,10 +63,12 @@ def tokens(text):
     return out
 
 def caption_layer(text, a, size_scale=1.0):
-    f = F_BOLD if size_scale == 1.0 else ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-Bold.otf", int(62 * size_scale))
+    sz = int(SIZE * size_scale)
+    f = fnt(FONT_BODY, sz); fh = fnt(FONT_HL, sz)
+    fo = lambda col: f if col == WHITE else fh
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
     toks = tokens(text); sp = d.textlength(" ", font=f)
-    tw_ = lambda l: sum(d.textlength(x, font=f) for x, _ in l) + sp * (len(l) - 1)
+    tw_ = lambda l: sum(d.textlength(x, font=fo(c)) for x, c in l) + sp * (len(l) - 1)
     if tw_(toks) <= 860:
         lines = [toks]
     else:                                                   # two balanced lines (no orphan words)
@@ -65,14 +77,13 @@ def caption_layer(text, a, size_scale=1.0):
     asc, desc = f.getmetrics(); lh = (asc + desc) * 1.12
     y = 1400 - lh * len(lines) / 2
     for line in lines:
-        tw = sum(d.textlength(x, font=f) for x, _ in line) + sp * (len(line) - 1)
-        x = (W - tw) / 2
+        x = (W - tw_(line)) / 2
         for word, col in line:
-            d.text((x, y), word, font=f, fill=col + (int(255 * a),))
-            x += d.textlength(word, font=f) + sp
+            d.text((x, y), word, font=fo(col), fill=col + (int(255 * a),))
+            x += d.textlength(word, font=fo(col)) + sp
         y += lh
     sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    sh.putalpha(img.getchannel("A").filter(ImageFilter.GaussianBlur(9)).point(lambda v: min(255, int(v * 1.5))))
+    sh.putalpha(img.getchannel("A").filter(ImageFilter.GaussianBlur(12)).point(lambda v: min(255, int(v * 1.25))))
     sh.alpha_composite(img)
     return np.asarray(sh).astype(np.float32) / 255
 
