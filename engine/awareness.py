@@ -69,11 +69,13 @@ def load_bg(path, seed):
 
 def smog_grade(arr):
     """Muted, warm-grey, lifted blacks: the look of a hazy, polluted day."""
+    orig = arr
     lum = arr @ np.array([0.299, 0.587, 0.114], np.float32)
     arr = arr * 0.55 + lum[..., None] * 0.45                      # desaturate
     arr = arr * np.array([1.04, 1.0, 0.90], np.float32)           # warm-grey cast
     arr = 18 + arr * 0.86                                         # lift blacks, compress highs
-    return arr
+    g = C.get("GRADE", 1.0)                                       # photos already hazy -> grade less
+    return arr * g + orig * (1 - g)
 
 # drifting haze: two large soft noise fields, scrolled slowly
 def noise_field(seed, scale):
@@ -99,7 +101,8 @@ def particles(t):
     return np.asarray(lay.filter(ImageFilter.GaussianBlur(1.2))).astype(np.float32) / 255
 
 # ------------------------------------------------------------------ text
-def text_layer(lines, t, dur):
+def text_layer(lines, t, dur, cy=None):
+    cy = C.get("TEXT_Y", 1000) if cy is None else cy
     """lines: [(text, style)]; style: big | key | red | body | small. Lines fade/rise in one by one."""
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
     blocks = []
@@ -131,7 +134,7 @@ def text_layer(lines, t, dur):
             for r_ in rows:
                 blocks.append((r_, f, WHITE if style == "body" else CREAM, 1.35))
     heights = [(b[1].getmetrics()[0] + b[1].getmetrics()[1]) * (0.98 if b[3] == 1.0 else b[3]) for b in blocks]
-    y = 1000 - sum(heights) / 2
+    y = cy - sum(heights) / 2
     n = len(blocks)
     out_a = 1 - ease((t - (dur - 0.7)) / 0.7)
     for i, ((text, f, col, _), h) in enumerate(zip(blocks, heights)):
@@ -227,9 +230,14 @@ for fi in range(nf):
         wsum = 1
     if wsum:
         fr /= max(wsum, 1.0) if wsum > 1 else 1.0
-    hz = haze(t)[..., None]
+    hz = haze(t)[..., None] * C.get("HAZE", 1.0)
     fr = fr * (1 - hz) + np.array([196, 186, 166], np.float32) * hz
-    fr = fr + particles(t)[..., None] * 70
+    fr = fr + particles(t)[..., None] * 70 * C.get("PARTICLES", 1.0)
+    if C.get("TEXT_SHADE"):                                       # darken the lower third behind the text
+        if fi == 0:
+            yy_ = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
+            SHADE_ = np.clip((yy_ - 0.55) / 0.35, 0, 1) * C["TEXT_SHADE"]
+        fr = fr * (1 - SHADE_ * (0 if t >= END_START else 1))
     # text
     for i, (_, lines, dur) in enumerate(SLIDES):
         ts = t - starts[i]
@@ -238,7 +246,7 @@ for fi in range(nf):
             a = L[..., 3:4]; fr = fr * (1 - a) + L[..., :3] * 255 * a
     if t >= END_START:
         te = t - END_START
-        L = text_layer(END_LINES, te, END_DUR + 5)                      # end card does not fade out
+        L = text_layer(END_LINES, te, END_DUR + 5, cy=1000)              # end card does not fade out
         a = L[..., 3:4]; fr = fr * (1 - a) + L[..., :3] * 255 * a
         al = ease((te - 0.9) / 0.8)
         if al > 0:
@@ -250,6 +258,9 @@ for fi in range(nf):
         yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
         VIG = (1 - 0.30 * (((xx - W / 2) / (W / 1.3)) ** 2 + ((yy - H / 2) / (H / 1.3)) ** 2))[..., None].clip(0.6, 1)
     fr = fr * VIG
+    if C.get("GRAIN"):                                            # fine moving film grain
+        gr = np.random.default_rng(fi).standard_normal((H // 2, W // 2)).astype(np.float32) * C["GRAIN"]
+        fr = fr + np.repeat(np.repeat(gr, 2, 0), 2, 1)[..., None]
     enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes())
 enc.stdin.close(); enc.wait()
 print("wrote", out)
