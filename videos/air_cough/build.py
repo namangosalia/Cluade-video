@@ -151,9 +151,9 @@ w_ = wave.open(aud_src); orig = np.frombuffer(w_.readframes(w_.getnframes()), np
 sr = 48000; n = int(TOTAL * sr); tt = np.arange(n) / sr
 noise = np.random.default_rng(5).standard_normal(n).astype(np.float32)
 rum = np.cumsum(noise); rum -= np.convolve(rum, np.ones(4800) / 4800, "same"); rum /= np.abs(rum).max() + 1e-9
-mix = rum * 0.10 * np.clip((tt - 6.5) / 2.0, 0, 1)
+mix = rum * 0.10 * np.clip((tt - 1.6) / 1.0, 0, 1)            # soft ambience under everything after the cough
 o = np.zeros(n, np.float32); o[:min(n, len(orig))] = orig[:n] * 1.6
-o *= np.clip((CLIP_END + 0.6 - tt) / 1.6, 0, 1)            # street sound fades as the skyline takes over
+o *= np.clip((2.1 - tt) / 0.3, 0, 1)                        # keep only the cough (0-2 s); no honking street noise after
 mix += o
 for (s0, s1, text, _) in CAPS + [(p_[1], p_[2], p_[4], 0) for p_ in PAIRS] + [(p_[0], p_[1], p_[3], 0) for p_ in PAIRS]:
     if "Heart" in text or "Today" in text:
