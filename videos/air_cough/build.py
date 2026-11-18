@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Air pollution x heart: man coughing (real footage) -> smoggy skyline, script captions.
+
+    python3 videos/air_cough/build.py
+
+0-2 s: the coughing clip at normal speed with its own sound; captions start on the cough.
+2-5 s of the clip: smooth slow motion (half speed, in-between frames from the real motion).
+Then a slow dissolve into the smoggy skyline (raw GIF frames blended, slow push-in) for the
+rest of the script. Captions: centred bold white sans in Title Case with a soft shadow (as the
+reference), key words coloured (amber = pollution, red = heart). Ends on "Learn More." No logo.
+"""
+import math, os, subprocess, wave
+import numpy as np
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageSequence
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+W, H, FPS = 1080, 1920, 30
+TMP = os.path.join(HERE, ".tmp"); os.makedirs(TMP, exist_ok=True)
+OUT = os.path.join(HERE, "output", "air_pollution_cough_9x16.mp4"); os.makedirs(os.path.dirname(OUT), exist_ok=True)
+F_BOLD = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-Bold.otf", 62)
+AMBER, RED, WHITE = (255, 186, 72), (255, 84, 72), (255, 255, 255)
+
+def ease(x):
+    x = min(max(x, 0.0), 1.0); return x * x * (3 - 2 * x)
+
+# ------------------------------------------------------------------ script: (start, end, text); {word} amber, [word] red
+CAPS = [
+    (0.85, 3.85, "Everyone Talks About {Air Pollution.}"),
+    (3.95, 6.75, "And What It Does To Our {Lungs.}"),
+    (6.85, 9.65, "But What Can We Do About It?"),
+    (9.75, 13.75, "The Fact: Air Pollution Also Harms Our [Hearts.]"),
+    (13.85, 17.95, "It Can Increase The Risk Of [Heart Attacks] And [Strokes]"),
+    (18.05, 22.05, "Especially With {Diabetes} Or {High Blood Pressure.}"),
+    (22.15, 25.25, "We Can't Fix The Air {Overnight.}"),
+    (25.35, 29.55, "But We Can Find Out Where Our [Heart Health] Stands"),
+    (29.65, 32.15, "[Today.]"),
+    (32.35, 36.35, "Learn More."),
+]
+TOTAL = 36.6
+CLIP_END = 8.0            # 2 s at 1x + 3 s at 0.5x
+SKY_IN = 7.2              # dissolve into the skyline starts
+
+def tokens(text):
+    out, mode = [], None
+    for raw in text.split(" "):
+        w = raw
+        if w.startswith("{"): mode, w = AMBER, w[1:]
+        elif w.startswith("["): mode, w = RED, w[1:]
+        end = w.endswith(("}", "]")) or w.endswith(("}.", "].", "},", "],"))
+        w = w.replace("}", "").replace("]", "")
+        out.append((w, mode or WHITE))
+        if end: mode = None
+    return out
+
+def caption_layer(text, a, size_scale=1.0):
+    f = F_BOLD if size_scale == 1.0 else ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-Bold.otf", int(62 * size_scale))
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    toks = tokens(text); sp = d.textlength(" ", font=f)
+    tw_ = lambda l: sum(d.textlength(x, font=f) for x, _ in l) + sp * (len(l) - 1)
+    if tw_(toks) <= 860:
+        lines = [toks]
+    else:                                                   # two balanced lines (no orphan words)
+        best = min(range(1, len(toks)), key=lambda i: max(tw_(toks[:i]), tw_(toks[i:])))
+        lines = [toks[:best], toks[best:]]
+    asc, desc = f.getmetrics(); lh = (asc + desc) * 1.12
+    y = 1400 - lh * len(lines) / 2
+    for line in lines:
+        tw = sum(d.textlength(x, font=f) for x, _ in line) + sp * (len(line) - 1)
+        x = (W - tw) / 2
+        for word, col in line:
+            d.text((x, y), word, font=f, fill=col + (int(255 * a),))
+            x += d.textlength(word, font=f) + sp
+        y += lh
+    sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    sh.putalpha(img.getchannel("A").filter(ImageFilter.GaussianBlur(9)).point(lambda v: min(255, int(v * 1.5))))
+    sh.alpha_composite(img)
+    return np.asarray(sh).astype(np.float32) / 255
+
+# ------------------------------------------------------------------ footage: 1x then smooth half-speed slow motion
+src = os.path.join(HERE, "raw", "cough.mp4")
+clip = os.path.join(TMP, "clip_9x16.mp4")
+crop = "crop=406:720:470:0,scale=1080:1920:flags=lanczos,unsharp=5:5:0.5:5:5:0"   # 9:16 window on the man
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-filter_complex",
+                f"[0:v]trim=0:2,setpts=PTS-STARTPTS,fps={FPS}[a];"
+                f"[0:v]trim=2:5,setpts=2*(PTS-STARTPTS),minterpolate=fps={FPS}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1[b];"
+                f"[a][b]concat=n=2:v=1:a=0,{crop}[v]", "-map", "[v]", "-c:v", "libx264", "-crf", "14", "-pix_fmt", "yuv420p", clip],
+               check=True)
+dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", clip, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+last_clip = None
+def clip_frame():
+    global last_clip
+    b = dec.stdout.read(W * H * 3)
+    if len(b) == W * H * 3:
+        last_clip = np.frombuffer(b, np.uint8).reshape(H, W, 3).astype(np.float32)
+    return last_clip
+
+# ------------------------------------------------------------------ smoggy skyline: GIF frames de-banded, slow blend, push-in
+gif = Image.open(os.path.join(HERE, "img", "skyline.gif"))
+sky = []
+for fr in ImageSequence.Iterator(gif):
+    p = os.path.join(TMP, "sky_in.png"); q = os.path.join(TMP, f"sky_{len(sky)}.png")
+    fr.convert("RGB").save(p)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", p, "-vf",
+                    "gradfun=strength=1.8:radius=28,scale=2160:-1:flags=lanczos,gradfun=strength=1.4:radius=32", q], check=True)
+    sky.append(np.asarray(Image.open(q).convert("RGB")).astype(np.float32))
+SH, SW = sky[0].shape[:2]
+def sky_frame(t):
+    u = (t - SKY_IN) / (TOTAL - SKY_IN)
+    k = (t - SKY_IN) / 4.5                                   # one GIF frame every 4.5 s, blended slowly
+    i0 = int(k) % len(sky); i1 = (i0 + 1) % len(sky); f = ease(k - int(k))
+    img = sky[i0] * (1 - f) + sky[i1] * f
+    z = 1.0 + 0.16 * u
+    ch = SH / z; cw = ch * 9 / 16
+    cx = SW * 0.47 + SW * 0.05 * u                           # around the sun, drifting slightly
+    x0 = min(max(cx - cw / 2, 0), SW - cw); y0 = (SH - ch) * 0.5
+    im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8)).resize((W, H), Image.BICUBIC, box=(x0, y0, x0 + cw, y0 + ch))
+    return np.asarray(im).astype(np.float32)
+
+# ------------------------------------------------------------------ sound: original cough + street, then low city ambience
+aud_src = os.path.join(TMP, "orig.wav")
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-filter_complex",
+                "[0:a]atrim=0:2,asetpts=PTS-STARTPTS[a];[0:a]atrim=2:5,asetpts=PTS-STARTPTS,atempo=0.5[b];"
+                "[a][b]concat=n=2:v=0:a=1,aresample=48000,pan=stereo|c0=c0|c1=c0", "-ac", "2", aud_src], check=True)
+w_ = wave.open(aud_src); orig = np.frombuffer(w_.readframes(w_.getnframes()), np.int16).astype(np.float32).reshape(-1, 2)[:, 0] / 32768
+sr = 48000; n = int(TOTAL * sr); tt = np.arange(n) / sr
+noise = np.random.default_rng(5).standard_normal(n).astype(np.float32)
+rum = np.cumsum(noise); rum -= np.convolve(rum, np.ones(4800) / 4800, "same"); rum /= np.abs(rum).max() + 1e-9
+mix = rum * 0.10 * np.clip((tt - 6.5) / 2.0, 0, 1)
+o = np.zeros(n, np.float32); o[:min(n, len(orig))] = orig[:n] * 1.6
+o *= np.clip((CLIP_END + 0.6 - tt) / 1.6, 0, 1)            # street sound fades as the skyline takes over
+mix += o
+for (s0, s1, text) in CAPS:                                  # heartbeat under the heart lines
+    if "Heart" in text or "Today" in text:
+        b = s0 + 0.2
+        while b < s1 - 0.2:
+            for off, amp in ((0.0, 1.0), (0.22, 0.6)):
+                q0, L = int((b + off) * sr), int(0.16 * sr)
+                if q0 + L < n:
+                    kk = np.arange(L) / sr
+                    mix[q0:q0 + L] += 0.35 * amp * np.sin(2 * np.pi * 52 * kk) * np.exp(-kk * 28)
+            b += 0.95
+mix *= np.minimum(1, (TOTAL - tt) / 1.5)
+aud = os.path.join(TMP, "sound.wav")
+with wave.open(aud, "wb") as wf:
+    wf.setnchannels(2); wf.setsampwidth(2); wf.setframerate(sr)
+    wf.writeframes((np.clip(np.stack([mix, mix], 1), -1, 1) * 32767 * 0.9).astype("<i2").tobytes())
+
+# ------------------------------------------------------------------ render
+enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
+                        "-i", "-", "-i", aud, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "slow", "-crf", "20",
+                        "-maxrate", "12M", "-bufsize", "24M", "-pix_fmt", "yuv420p", "-colorspace", "bt709",
+                        "-color_primaries", "bt709", "-color_trc", "bt709", "-c:a", "aac", "-b:a", "192k",
+                        "-af", "loudnorm=I=-16:TP=-1.5", "-movflags", "+faststart", "-shortest", OUT], stdin=subprocess.PIPE)
+yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+VIG = (1 - 0.30 * (((xx - W / 2) / (W / 1.3)) ** 2 + ((yy - H / 2) / (H / 1.3)) ** 2))[..., None].clip(0.6, 1)
+BAND = (1 - 0.35 * np.exp(-((yy[:, :1] - 1400) / 260) ** 2))[..., None]   # gentle darkening behind captions
+for fi in range(round(TOTAL * FPS)):
+    t = fi / FPS
+    fr = clip_frame() if t < CLIP_END + 0.5 else last_clip
+    if t >= SKY_IN:
+        m = ease((t - SKY_IN) / 1.4)
+        fr = fr * (1 - m) + sky_frame(t) * m
+    fr = fr * VIG * BAND
+    for s0, s1, text in CAPS:
+        if s0 - 0.05 <= t < s1:
+            hold = text.startswith("Learn")
+            a = ease((t - s0) / 0.35) * (1.0 if hold else 1 - ease((t - (s1 - 0.3)) / 0.3))
+            L = caption_layer(text, a, 1.25 if text in ("[Today.]", "Learn More.") else 1.0)
+            fr = fr * (1 - L[..., 3:4]) + L[..., :3] * 255 * L[..., 3:4]
+    g = np.random.default_rng(fi).standard_normal((H // 2, W // 2)).astype(np.float32) * 3.0
+    fr = fr + np.repeat(np.repeat(g, 2, 0), 2, 1)[..., None]
+    enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes())
+enc.stdin.close(); enc.wait(); dec.terminate()
+print("wrote", OUT)
