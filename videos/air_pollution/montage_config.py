@@ -8,7 +8,7 @@ OUTPUT = "output/air_pollution_montage_9x16.mp4"
 G = "img/gifs2/"
 
 SCENES = [
-    {"frames": G + "g1_f*.png", "dur": 9.4, "method": "dissolve", "x": 0.52, "y": 0.35, "push": 0.10,
+    {"frames": G + "g1_f*.png", "dur": 9.4, "method": "dissolve", "x": 0.40, "y": 0.35, "push": 0.10,
      "text": [([("Everyone talks about", "body"), ("AIR POLLUTION.", "big")], 0.2, 4.7),
               ([("And how it affects", "body"), ("OUR LUNGS.", "big")], 4.7, 9.0)]},
     {"frames": G + "g2_f*.png", "dur": 6.2, "method": "dissolve", "x": 0.50, "y": 0.35, "push": 0.09,

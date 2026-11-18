@@ -46,7 +46,7 @@ def build_clip(k, sc):
     if sc.get("method") == "interp":
         vf = f"minterpolate=fps={FPS}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
     else:                                                     # hold, then a soft blend into the next keyframe
-        vf = f"framerate=fps={FPS}:interp_start=40:interp_end=215"
+        vf = f"framerate=fps={FPS}:interp_start=85:interp_end=170"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-framerate", f"1/{hold}", "-i", pre.replace("%02d", "%02d"),
                     "-vf", vf + f",tpad=stop_mode=clone:stop_duration={hold}", "-t", str(dur),
                     "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv444p", out], check=True)
