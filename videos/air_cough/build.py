@@ -204,14 +204,19 @@ enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_f
                         "-af", "loudnorm=I=-16:TP=-1.5", "-movflags", "+faststart", "-shortest", OUT], stdin=subprocess.PIPE)
 yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
 VIG = (1 - 0.30 * (((xx - W / 2) / (W / 1.3)) ** 2 + ((yy - H / 2) / (H / 1.3)) ** 2))[..., None].clip(0.6, 1)
-BAND = (1 - 0.35 * np.exp(-((yy[:, :1] - 1400) / 260) ** 2))[..., None]   # gentle darkening behind captions
+MID_FROM = 9.7             # captions after the coughing clip sit mid-screen (clear of Instagram's bottom UI)
+def cap_y(s0):
+    return 960 if s0 >= MID_FROM else 1400
+BAND_LO = (1 - 0.35 * np.exp(-((yy[:, :1] - 1400) / 260) ** 2))[..., None]   # gentle darkening behind captions
+BAND_MID = (1 - 0.35 * np.exp(-((yy[:, :1] - 960) / 260) ** 2))[..., None]
 for fi in range(round(TOTAL * FPS)):
     t = fi / FPS
     fr = clip_frame() if t < CLIP_END + 0.5 else last_clip
     if t >= SKY_IN:
         m = ease((t - SKY_IN) / 1.4)
         fr = fr * (1 - m) + sky_frame(t) * m
-    fr = fr * VIG * BAND
+    wb = ease((t - (MID_FROM - 0.5)) / 0.5)
+    fr = fr * VIG * (BAND_LO * (1 - wb) + BAND_MID * wb)
     if t >= CTA_START:                                          # original Learn More ending
         mm = ease((t - CTA_START) / 0.8)
         if GREY_BG is None:
@@ -233,11 +238,12 @@ for fi in range(round(TOTAL * FPS)):
             scb = (1 + 0.08 * ease((t - tb) / (te - tb))) if zb else 1.0
             ha, hb, gap = block_h(txa), block_h(txb, scb), 36
             k = ease((t - tb) / 0.6)                                # first line glides up as the second arrives
-            ya = 1400 + k * ((-(ha + gap + hb) / 2 + ha / 2))
+            cy0 = cap_y(ta)
+            ya = cy0 + k * ((-(ha + gap + hb) / 2 + ha / 2))
             La = caption_layer(txa, ease((t - ta) / 0.35) * out_a, 1.0, ya)
             fr = fr * (1 - La[..., 3:4]) + La[..., :3] * 255 * La[..., 3:4]
             if t >= tb - 0.05:
-                yb = 1400 + (ha + gap + hb) / 2 - hb / 2
+                yb = cy0 + (ha + gap + hb) / 2 - hb / 2
                 Lb = caption_layer(txb, ease((t - tb - 0.15) / 0.45) * out_a, scb, yb)
                 fr = fr * (1 - Lb[..., 3:4]) + Lb[..., :3] * 255 * Lb[..., 3:4]
     for s0, s1, text, zoom in CAPS:
@@ -245,7 +251,7 @@ for fi in range(round(TOTAL * FPS)):
             a = ease((t - s0) / 0.35) * (1 - ease((t - (s1 - 0.3)) / 0.3))
             base = 1.25 if text == "[Today!]" else 1.0
             sc = base * (1 + 0.08 * ease((t - s0) / (s1 - s0))) if zoom else base    # slow, slight zoom-in
-            L = caption_layer(text, a, sc)
+            L = caption_layer(text, a, sc, cap_y(s0))
             fr = fr * (1 - L[..., 3:4]) + L[..., :3] * 255 * L[..., 3:4]
     g = np.random.default_rng(fi).standard_normal((H // 2, W // 2)).astype(np.float32) * 3.0
     fr = fr + np.repeat(np.repeat(g, 2, 0), 2, 1)[..., None]
