@@ -173,10 +173,9 @@ with wave.open(aud, "wb") as wf:
     wf.writeframes((np.clip(np.stack([mix, mix], 1), -1, 1) * 32767 * 0.9).astype("<i2").tobytes())
 
 # ------------------------------------------------------------------ Learn More card (same as the earlier reels)
-def make_cta(text="LEARN MORE"):
-    f = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-SemiBold.otf", 38)
+def make_cta(text="LEARN MORE", size=38, track=6):
+    f = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-SemiBold.otf", size)
     d = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    track = 6
     widths = [d.textlength(ch, font=f) for ch in text]
     tw = sum(widths) + track * (len(text) - 1)
     pw, ph, pad = int(tw + 2 * 70), 104, 30
@@ -193,7 +192,8 @@ def make_cta(text="LEARN MORE"):
         dr.text((x, y), ch, font=f, fill=(34, 36, 40, 255))
         x += wd + track
     return img
-CTA = make_cta()
+CTA = make_cta("FIND OUT YOUR HEART HEALTH", size=34, track=4)
+print("CTA card width", CTA.width)
 GREY_BG = None
 
 # ------------------------------------------------------------------ render
