@@ -108,9 +108,26 @@ fc.append("".join(f"[v{i}][a{i}]" for i in range(len(keep))) + f"concat=n={len(k
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SRC, "-filter_complex", "".join(fc), "-map", "[v]", "-map", "[a]",
                 "-c:v", "libx264", "-crf", "12", "-preset", "fast", "-r", str(FPS), "-c:a", "pcm_s16le", cut_mp4], check=True)
 
-# ---------------------------------------------------------------- caption overlays (small, bottom, soft shadow)
-FONT = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-Medium.otf", 44)
-MAXW, BOTTOM, LH = 1500, 895, 58          # bottom of the frame, just above the channel's news ticker band
+# ---------------------------------------------------------------- clean the voice: remove the room / crowd noise
+import noisereduce as nr
+raw48 = os.path.join(TMP, "cut48.wav"); clean = os.path.join(TMP, "clean.wav")
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", cut_mp4, "-vn", "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", raw48], check=True)
+w = wave.open(raw48); x = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
+src48 = os.path.join(TMP, "src48.wav")
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SRC, "-vn", "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", src48], check=True)
+w = wave.open(src48); xs = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
+noise = np.concatenate([xs[int(a * 48000):int(b * 48000)] for a, b in pauses])      # the room tone between his sentences
+y = nr.reduce_noise(y=x, sr=48000, y_noise=noise, stationary=True, prop_decrease=0.9, n_fft=2048)
+y = nr.reduce_noise(y=y, sr=48000, stationary=False, prop_decrease=0.5, n_fft=2048)   # second, gentle pass for chatter
+with wave.open(clean, "wb") as wf:
+    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(48000)
+    wf.writeframes((np.clip(y, -1, 1) * 32767).astype("<i2").tobytes())
+VOICE = ("highpass=f=85,lowpass=f=9000,equalizer=f=3000:t=q:w=1.2:g=2,"
+         "acompressor=threshold=0.08:ratio=2.5:attack=8:release=120:makeup=1.5,loudnorm=I=-16:TP=-1.5")
+
+# ---------------------------------------------------------------- caption overlays (bottom, soft shadow)
+FONT = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-Medium.otf", 54)        # a little bigger: the speech is fast
+MAXW, BOTTOM, LH = 1560, 895, 70          # bottom of the frame, just above the channel's news ticker band
 
 def wrap(text):
     words, lines, cur = text.split(), [], ""
@@ -161,9 +178,9 @@ dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", cut_mp4, "-vf",
                         f"scale={W}:{H}:flags=lanczos,unsharp=5:5:0.35:5:5:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                        stdout=subprocess.PIPE)
 enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
-                        "-i", "-", "-i", cut_mp4, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "slow",
+                        "-i", "-", "-i", clean, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "slow",
                         "-crf", "19", "-maxrate", "12M", "-bufsize", "24M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
-                        "-af", "loudnorm=I=-16:TP=-1.5", "-movflags", "+faststart", "-shortest", OUT], stdin=subprocess.PIPE)
+                        "-af", VOICE, "-ac", "2", "-movflags", "+faststart", "-shortest", OUT], stdin=subprocess.PIPE)
 fi = 0
 while True:
     b = dec.stdout.read(W * H * 3)
