@@ -181,24 +181,65 @@ def layer(text):
         d.text((x, y0 + i * LH), ln, font=FONT, fill=(255, 255, 255, 255), stroke_width=1, stroke_fill=(0, 0, 0, 90))
     return np.asarray(img).astype(np.float32) / 255
 LAYERS = [layer(t) for _, _, t in caps]
-CY0 = BOTTOM + 20 - 260
 
-dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", cut_mp4, "-vf",
-                        f"scale={W}:{H}:flags=lanczos,unsharp=5:5:0.35:5:5:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                       stdout=subprocess.PIPE)
+def ease(x):
+    x = min(max(x, 0.0), 1.0); return x * x * (3 - 2 * x)
+
+# ---------------------------------------------------------------- follow the speaker: full frame first, then a close view of him
+import cv2
+SW, SH = 640, 360
+INTRO, PUSH = 2.5, 2.2          # full frame for 2.5 s, then a slow push-in onto him
+CH = 150                         # close-view height in source pixels (2.4x): him only, not the panel
+CW = CH * 16 / 9
+fcas = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+cap = cv2.VideoCapture(cut_mp4); det = []
+while True:
+    ok, f = cap.read()
+    if not ok: break
+    g = cv2.equalizeHist(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY))
+    bx = [b for b in fcas.detectMultiScale(g, 1.08, 4, minSize=(18, 18)) if b[0] + b[2] / 2 > 400 and b[1] < 200]
+    det.append(max(bx, key=lambda b: b[2]) if len(bx) else None)          # the speaker is the man on the right
+N = len(det)
+idx = [k for k in range(N) if det[k] is not None]
+raw = np.array([[det[k][0] + det[k][2] / 2, det[k][1] + det[k][3] / 2, det[k][2]] for k in idx], np.float32)
+raw = np.stack([np.array([np.median(raw[max(0, k - 4):k + 5, c]) for k in range(len(raw))]) for c in range(3)], 1)  # drop odd detections
+track = np.stack([np.interp(np.arange(N), idx, raw[:, c]) for c in range(3)], 1)
+# the news camera itself re-frames now and then: let the view jump with those cuts, glide everywhere else
+jumps = [0] + [k for k in range(1, N) if abs(track[k, 0] - track[k - 1, 0]) > 14 or abs(track[k, 1] - track[k - 1, 1]) > 14
+               or abs(track[k, 2] / track[k - 1, 2] - 1) > 0.2] + [N]
+sm = track.copy()
+for a, b in zip(jumps, jumps[1:]):
+    if b - a > 3:
+        for c in range(3):
+            seg = np.pad(track[a:b, c], 30, mode="edge")
+            k = np.exp(-0.5 * (np.arange(-30, 31) / 10.0) ** 2); k /= k.sum()
+            sm[a:b, c] = np.convolve(seg, k, mode="same")[30:-30]
+def view(fi):
+    cx, cy, _ = sm[min(fi, N - 1)]
+    x0 = float(np.clip(cx - CW * 0.5, 0, SW - CW)); y0 = float(np.clip(cy - CH * 0.33, 52, 300 - CH))   # clear of the channel's logo and ticker
+    z = ease((fi / FPS - INTRO) / PUSH)
+    return x0 * z, y0 * z, SW + (CW - SW) * z, SH + (CH - SH) * z, z
+
+dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", cut_mp4, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
 enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
                         "-i", "-", "-i", clean, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "slow",
                         "-crf", "19", "-maxrate", "12M", "-bufsize", "24M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
                         "-af", VOICE, "-ac", "2", "-movflags", "+faststart", "-shortest", OUT], stdin=subprocess.PIPE)
 fi = 0
 while True:
-    b = dec.stdout.read(W * H * 3)
-    if len(b) < W * H * 3: break
+    b = dec.stdout.read(SW * SH * 3)
+    if len(b) < SW * SH * 3: break
     t = fi / FPS
-    fr = np.frombuffer(b, np.uint8).reshape(H, W, 3).astype(np.float32)
+    src = np.frombuffer(b, np.uint8).reshape(SH, SW, 3)
+    x0, y0, vw, vh, z = view(fi)
+    sc = W / vw
+    M = np.array([[sc, 0, -x0 * sc], [0, sc, -y0 * sc]], np.float32)
+    fr = cv2.warpAffine(src, M, (W, H), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
+    fr = fr * 1.4 - cv2.GaussianBlur(fr, (0, 0), 1.6) * 0.4                     # gentle sharpening after the upscale
+    CY0 = int(round(BOTTOM + (1000 - BOTTOM) * z)) + 20 - 260                   # above the ticker on the full frame, lower once close
     for (s, e, _), L in zip(caps, LAYERS):
         if s - 0.02 <= t < e:
-            a = min(1, (t - s) / 0.12 + 1) * min(1, (e - t) / 0.12)          # quick soft in/out, no motion
+            a = min(1, (e - t) / 0.12)
             al = L[..., 3:4] * a
             fr[CY0:CY0 + 260] = fr[CY0:CY0 + 260] * (1 - al) + L[..., :3] * 255 * al
             break
