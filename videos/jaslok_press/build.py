@@ -38,10 +38,6 @@ LINES = [
     (66.60, 68.55, "ki sau se upar hua toh aap risk pe ho,"),
     (68.55, 70.40, "aur sau se neeche hua toh aap risk pe nahi."),
     (70.40, 71.45, "Wo nahi hona chahiye."),
-    (72.05, 76.85, "Shayad aapka thirty-five hai, aur koi aur cheez bahut badi hai,"),
-    (77.20, 77.98, "jisse aapka risk bada hai,"),
-    (78.70, 80.25, "ya phir genetic predisposition se,"),
-    (80.25, 82.20, "ya phir aapka Lipoprotein(a) bahut high hai."),
     (82.95, 85.80, "Toh agar wo saare combination together karke"),
     (85.80, 87.85, "jo personalised recommendation doctor ko milta hai,"),
     (88.25, 91.08, "usse doctor aapko pehle se assess kar paayega."),
@@ -71,11 +67,14 @@ wav = os.path.join(TMP, "a.wav")
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SRC, "-ac", "1", "-ar", "16000", wav], check=True)
 pauses, DUR = find_pauses(wav)
 FILLERS = [(10.45, 11.15)]                 # "aa," before "toh wo saare biomarkers"
+REMOVE = (71.60, 82.88)                    # lines cut on request: "Shayad aapka ..." to "... Lipoprotein(a) bahut high hai"
+DISS = 0.40                                # sound blends softly over that cut; picture cuts cleanly mid-blend
 KEEP_GAP = 0.14                            # breath left in each cut pause
 cuts = []
 for s, e in pauses + FILLERS:
     if e - s > KEEP_GAP:
         cuts.append((s + KEEP_GAP / 2, e - KEEP_GAP / 2))
+cuts.append(REMOVE)
 cuts.sort()
 merged = []
 for s, e in cuts:
@@ -95,6 +94,9 @@ def remap(t):
         if t <= e: return acc + t - s
         acc += e - s
     return acc
+_remap = remap
+def remap(t):
+    return _remap(t) - (DISS if t >= REMOVE[1] - 0.01 else 0.0)
 NEW_DUR = remap(DUR)
 print(f"cuts: {len(merged)}  {DUR:.1f}s -> {NEW_DUR:.1f}s")
 
@@ -104,7 +106,14 @@ fc, XF = [], 0.02
 for i, (s, e) in enumerate(keep):
     fc.append(f"[0:v]trim={s:.3f}:{e:.3f},setpts=PTS-STARTPTS[v{i}];"
               f"[0:a]atrim={s:.3f}:{e:.3f},asetpts=PTS-STARTPTS,afade=t=in:d={XF},afade=t=out:st={max(0, e - s - XF):.3f}:d={XF}[a{i}];")
-fc.append("".join(f"[v{i}][a{i}]" for i in range(len(keep))) + f"concat=n={len(keep)}:v=1:a=1[v][a]")
+J = next(i for i, (s, e) in enumerate(keep) if s >= REMOVE[0])           # first piece after the removed lines
+lenA = sum(e - s for s, e in keep[:J])
+fc.append("".join(f"[v{i}][a{i}]" for i in range(J)) + f"concat=n={J}:v=1:a=1[va][aa];")
+fc.append("".join(f"[v{i}][a{i}]" for i in range(J, len(keep))) + f"concat=n={len(keep) - J}:v=1:a=1[vb][ab];")
+# picture: a clean camera-style cut in the middle of the sound blend (a dissolve ghosts the two framings)
+fc.append(f"[va]fps={FPS},trim=0:{lenA - DISS / 2:.3f},setpts=PTS-STARTPTS[va2];[vb]fps={FPS},trim={DISS / 2:.3f},setpts=PTS-STARTPTS[vb2];"
+          f"[va2][vb2]concat=n=2:v=1:a=0[v];"
+          f"[aa][ab]acrossfade=d={DISS}:c1=tri:c2=tri[a]")
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SRC, "-filter_complex", "".join(fc), "-map", "[v]", "-map", "[a]",
                 "-c:v", "libx264", "-crf", "12", "-preset", "fast", "-r", str(FPS), "-c:a", "pcm_s16le", cut_mp4], check=True)
 
