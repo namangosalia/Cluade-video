@@ -134,13 +134,18 @@ src48 = os.path.join(TMP, "src48.wav")
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SRC, "-vn", "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", src48], check=True)
 w = wave.open(src48); xs = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
 noise = np.concatenate([xs[int(a * 48000):int(b * 48000)] for a, b in pauses])      # the room tone between his sentences
-y = nr.reduce_noise(y=x, sr=48000, y_noise=noise, stationary=True, prop_decrease=0.9, n_fft=2048)
-y = nr.reduce_noise(y=y, sr=48000, stationary=False, prop_decrease=0.5, n_fft=2048)   # second, gentle pass for chatter
+y = nr.reduce_noise(y=x, sr=48000, y_noise=noise, stationary=True, prop_decrease=0.95, n_fft=2048)
+y = nr.reduce_noise(y=y, sr=48000, stationary=False, prop_decrease=0.7, n_fft=2048)    # second pass for chatter
 with wave.open(clean, "wb") as wf:
     wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(48000)
     wf.writeframes((np.clip(y, -1, 1) * 32767).astype("<i2").tobytes())
-VOICE = ("highpass=f=85,lowpass=f=9000,equalizer=f=3000:t=q:w=1.2:g=2,"
-         "acompressor=threshold=0.08:ratio=2.5:attack=8:release=120:makeup=1.5,loudnorm=I=-16:TP=-1.5")
+# studio-style voice: rumble off, room "box" tamed, warmth + presence, residual room dipped between words, levelled
+VOICE = ("highpass=f=80,afftdn=nr=8:nf=-42,"
+         "equalizer=f=280:t=q:w=1.0:g=-3.5,equalizer=f=600:t=q:w=1.5:g=-1.5,"
+         "lowshelf=f=130:g=2.5,equalizer=f=3500:t=q:w=1.0:g=3,highshelf=f=9500:g=2,lowpass=f=14000,"
+         "agate=threshold=0.02:ratio=2:range=0.2:attack=5:release=200,"
+         "deesser=i=0.4,acompressor=threshold=0.06:ratio=3:attack=5:release=110:makeup=2,"
+         "loudnorm=I=-16:TP=-1.5:LRA=7")
 
 # ---------------------------------------------------------------- caption overlays (bottom, soft shadow)
 FONT = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-Medium.otf", 54)        # a little bigger: the speech is fast
@@ -225,7 +230,7 @@ for a, b in zip(jumps, jumps[1:]):
 def view(fi):
     cx, cy, _ = sm[min(fi, N - 1)]
     x0 = float(np.clip(cx - CW * 0.5, 0, SW - CW)); y0 = float(np.clip(cy - CH * 0.33, 34, SH - CH))   # clear of the small logo in the top corner
-    z = ease((fi / FPS - INTRO) / PUSH)
+    z = 0.0                     # no zoom: keep the full original frame, heading screen and media logo included
     return x0 * z, y0 * z, SW + (CW - SW) * z, SH + (CH - SH) * z, z
 
 # ---------------------------------------------------------------- rolling news line at the bottom
