@@ -13,9 +13,10 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "raw", "press_hd.mp4")
-OUT = os.path.join(HERE, "output", "jaslok_press_hd_16x9.mp4")
+OUT = os.path.join(HERE, "output", "jaslok_press_hd_9x16.mp4")
 TMP = os.path.join(HERE, ".tmp"); os.makedirs(TMP, exist_ok=True)
-W, H, FPS = 1920, 1080, 25
+W, H, FPS = 1080, 1920, 25               # Instagram vertical
+VW, VH, VY = 1080, 608, 500             # the full 16:9 picture, upper-middle of the frame
 
 # ---------------------------------------------------------------- captions on the ORIGINAL timeline
 LINES = [
@@ -149,7 +150,7 @@ VOICE = ("highpass=f=80,afftdn=nr=8:nf=-42,"
 
 # ---------------------------------------------------------------- caption overlays (bottom, soft shadow)
 FONT = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-Medium.otf", 54)        # a little bigger: the speech is fast
-MAXW, BOTTOM, LH = 1560, 975, 70          # bottom of the frame, just above our news ticker
+MAXW, LH = 960, 70                        # captions sit just under the news line
 
 def wrap(text):
     words, lines, cur = text.split(), [], ""
@@ -160,11 +161,15 @@ def wrap(text):
         a, b = " ".join(words[:k]), " ".join(words[k:])
         wa, wb = d.textlength(a, font=FONT), d.textlength(b, font=FONT)
         if max(wa, wb) <= MAXW and (best is None or abs(wa - wb) < best[0]): best = (abs(wa - wb), [a, b])
-    return best[1]
+    if best: return best[1]
+    for w_ in words:                                   # rare long line: greedy wrap
+        if cur and d.textlength(cur + " " + w_, font=FONT) > MAXW: lines.append(cur); cur = w_
+        else: cur = (cur + " " + w_).strip()
+    return lines + [cur]
 
 def chunks(s, e, text):
     """long sentences shown as two consecutive captions, split at a comma or mid-way"""
-    if len(text) <= 70: return [(s, e, text)]
+    if len(text) <= 56: return [(s, e, text)]       # vertical frame: keep each caption to two lines
     words = text.split(); n = len(words)
     cand = [k for k in range(2, n - 1) if words[k - 1].endswith(",")]
     k = min(cand, key=lambda k: abs(k - n / 2)) if cand else n // 2
@@ -182,7 +187,7 @@ for i in range(len(caps) - 1):                      # hold each caption until th
 def layer(text):
     img = Image.new("RGBA", (W, 260), (0, 0, 0, 0))
     lines = wrap(text); d = ImageDraw.Draw(img)
-    y0 = 260 - 20 - LH * len(lines)
+    y0 = 24                                           # text hangs from the top of the block, just under the news line
     sh = Image.new("L", img.size, 0); ds = ImageDraw.Draw(sh)
     for i, ln in enumerate(lines):
         x = (W - d.textlength(ln, font=FONT)) / 2
@@ -235,9 +240,10 @@ def view(fi):
 
 # ---------------------------------------------------------------- rolling news line at the bottom
 TICKER = "AnginaX Press Conference at Jaslok Hospital, Maharashtra"
-TICK_H, NAVY, RED, SPEED = 64, (16, 30, 62), (200, 36, 46), 150     # band height, colours, scroll px/s
-TICK_Y = H - TICK_H
-_tf = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-SemiBold.otf", 34)
+TICK_H, NAVY, RED, SPEED = 58, (16, 30, 62), (200, 36, 46), 130     # band height, colours, scroll px/s
+TICK_Y = VY + VH
+CY0 = TICK_Y + TICK_H + 10                # caption block (260 px tall, text at its foot) under the news line
+_tf = ImageFont.truetype("/usr/share/fonts/opentype/inter/Inter-SemiBold.otf", 30)
 _unit = TICKER + "      \u2022      "
 _uw = int(ImageDraw.Draw(Image.new("L", (1, 1))).textlength(_unit, font=_tf))
 STRIP_W = _uw
@@ -259,28 +265,30 @@ while True:
     if len(b) < SW * SH * 12: break
     t = fi / FPS
     src = np.frombuffer(b, np.uint8).reshape(SH * 2, SW * 2, 3)
-    x0, y0, vw, vh, z = view(fi)
-    sc = W / (vw * 2); x0 *= 2; y0 *= 2
-    M = np.array([[sc, 0, -x0 * sc], [0, sc, -y0 * sc]], np.float32)
-    fr = cv2.warpAffine(src, M, (W, H), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
-    fr = fr * 1.4 - cv2.GaussianBlur(fr, (0, 0), 1.6) * 0.4                     # gentle sharpening after the upscale
-    CY0 = BOTTOM + 20 - 260
+    # background: the same shot, softly blurred and darkened, filling the vertical frame
+    cw = int(SH * 2 * W / H)
+    bg = cv2.resize(src[:, (SW * 2 - cw) // 2:(SW * 2 + cw) // 2], (W // 20, H // 20), interpolation=cv2.INTER_AREA)
+    bg = cv2.resize(cv2.GaussianBlur(bg, (0, 0), 2.2), (W, H), interpolation=cv2.INTER_CUBIC).astype(np.float32) * 0.38
+    fr = bg
+    # the full original 16:9 frame (no crop, heading and media logo intact)
+    v = cv2.resize(src, (VW, VH), interpolation=cv2.INTER_AREA).astype(np.float32)
+    fr[VY:VY + VH] = v
+    # rolling news line directly under the picture
+    ka = ease(t / 0.6)
+    band = fr[TICK_Y:TICK_Y + TICK_H]
+    band[:] = band * (1 - 0.95 * ka) + np.array(NAVY, np.float32) * 0.95 * ka
+    band[:3] = band[:3] * (1 - ka) + np.array(RED, np.float32) * ka
+    off = int(t * SPEED) % STRIP_W
+    seg = STRIP[:, off:off + W]
+    al = seg[..., 3:4] * ka
+    band[:] = band * (1 - al) + seg[..., :3] * 255 * al
+    # captions below it, clear of Instagram's bottom buttons
     for (s, e, _), L in zip(caps, LAYERS):
         if s - 0.02 <= t < e:
             a = min(1, (e - t) / 0.12)
             al = L[..., 3:4] * a
             fr[CY0:CY0 + 260] = fr[CY0:CY0 + 260] * (1 - al) + L[..., :3] * 255 * al
             break
-    ty = TICK_Y + int(round(TICK_H * (1 - ease(t / 0.6))))                # ticker slides up at the start, then scrolls
-    hh = H - ty
-    if hh > 0:
-        band = fr[ty:H]
-        band[:] = band * (1 - 0.92) + np.array(NAVY, np.float32) * 0.92
-        band[:3] = np.array(RED, np.float32)
-        off = int(t * SPEED) % STRIP_W
-        seg = STRIP[:hh, off:off + W]
-        al = seg[..., 3:4]
-        band[:, :seg.shape[1]] = band[:, :seg.shape[1]] * (1 - al) + seg[..., :3] * 255 * al
     enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes()); fi += 1
 enc.stdin.close(); enc.wait(); dec.wait()
 print("wrote", OUT)
