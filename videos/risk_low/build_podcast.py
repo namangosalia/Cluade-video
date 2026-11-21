@@ -87,7 +87,7 @@ def unmap(tn):
         acc += e - s
     return keep[-1][1]
 TW = lambda i: remap(words[i][0])
-OUTRO = 1.6
+OUTRO = 4.0                                   # soft dissolve, then "Learn about your HeartPass" held 3 s
 TOTAL = BODY + OUTRO
 print(f"{len(keep)} pieces, body {BODY:.1f}s (raw {DUR:.1f}s)")
 
@@ -129,8 +129,16 @@ def picture(wipe_x):
             pass
     return cv2.resize(out, (W, H), interpolation=cv2.INTER_CUBIC)
 
-T_IN, T_OUT = TW(18) - 0.25, remap(words[61][1]) + 0.5        # picture: "there's a follow-up ..." -> "... maintain low risk."
-WIPE = [(T_IN + 0.4, 841), (TW(27), 895), (TW(32), 1068), (TW(34) + 0.3, 1380), (TW(58), 1380), (TW(58) + 1.8, 1625)]
+T_IN, T_OUT = TW(11) - 0.3, remap(words[61][1]) + 1.2        # picture card: "like every 3-6 months ..." -> "... maintain low risk."
+# slow: the line eases down High -> Moderate -> Low across his sentence, then carries on while he says "maintain"
+WIPE = [(T_IN + 1.2, 841), (TW(27), 895), (TW(32) + 0.2, 1068), (TW(34) + 1.0, 1380), (TW(55), 1380), (TW(55) + 3.0, 1625)]
+# the card sits bottom-right, below his chin (face never lower than y~680 in 1080), with rounded corners + shadow
+IW, IH = 840, 473
+IX, IY = W - IW - 44, H - IH - 40
+IMASK = Image.new("L", (IW, IH), 0); ImageDraw.Draw(IMASK).rounded_rectangle((0, 0, IW - 1, IH - 1), 22, fill=255)
+IMASK = (np.asarray(IMASK).astype(np.float32) / 255)[..., None]
+_sh = Image.new("L", (IW + 80, IH + 80), 0); ImageDraw.Draw(_sh).rounded_rectangle((40, 52, 40 + IW, 52 + IH), 22, fill=170)
+ISHADOW = (np.asarray(_sh.filter(ImageFilter.GaussianBlur(18))).astype(np.float32) / 255)[..., None]
 def wipe_at(t):
     xs_ = [w_[1] for w_ in WIPE]; ts_ = [w_[0] for w_ in WIPE]
     if t <= ts_[0]: return 841.0 - 40
@@ -160,28 +168,43 @@ GROUPS = [
     (109, 118, "But this is how we're going to save lives."),
 ]
 dd = ImageDraw.Draw(Image.new("L", (1, 1)))
-def cap_layer(text):
+def cap_layer(text, cx=W / 2, maxw=MAXW):
     lines, cur = [], ""
     for w_ in text.split():
-        if cur and dd.textlength(cur + " " + w_, font=F_BODY) > MAXW: lines.append(cur); cur = w_
+        if cur and dd.textlength(cur + " " + w_, font=F_BODY) > maxw: lines.append(cur); cur = w_
         else: cur = (cur + " " + w_).strip()
     lines.append(cur)
     hgt = LH * len(lines) + 40
     img = Image.new("RGBA", (W, hgt), (0, 0, 0, 0))
     sh = Image.new("L", img.size, 0); ds = ImageDraw.Draw(sh)
     for i, ln in enumerate(lines):
-        ds.text((W / 2, 22 + i * LH + 3), ln, font=F_BODY, fill=230, anchor="ma")
+        ds.text((cx, 22 + i * LH + 3), ln, font=F_BODY, fill=230, anchor="ma")
     shadow = Image.new("RGBA", img.size, (0, 0, 0, 0)); shadow.putalpha(sh.filter(ImageFilter.GaussianBlur(5)))
     img = Image.alpha_composite(img, shadow); d = ImageDraw.Draw(img)
     for i, ln in enumerate(lines):
-        d.text((W / 2, 22 + i * LH), ln, font=F_BODY, fill=(255, 255, 255, 255), anchor="ma")
+        d.text((cx, 22 + i * LH), ln, font=F_BODY, fill=(255, 255, 255, 255), anchor="ma")
     return np.asarray(img).astype(np.float32) / 255
 caps = []
 for gi, (i0, i1, text) in enumerate(GROUPS):
     s0 = TW(i0); e0 = remap(words[i1 - 1][1]) + 0.5
     if gi + 1 < len(GROUPS): e0 = min(e0, TW(GROUPS[gi + 1][0]) - 0.04) if TW(GROUPS[gi + 1][0]) - e0 < 0.6 else e0
-    caps.append((s0, e0, cap_layer(text)))
+    caps.append((s0, e0, cap_layer(text), cap_layer(text, cx=(IX - 30) / 2 + 10, maxw=IX - 90)))
 CAP_BOTTOM = H - 46
+
+# ---------------------------------------------------------------- end card button
+def make_cta(text):
+    d = ImageDraw.Draw(Image.new("RGBA", (1, 1))); f = F("Inter-SemiBold.otf", 40); track = 6
+    widths = [d.textlength(ch, font=f) for ch in text]; t_w = sum(widths) + track * (len(text) - 1)
+    pw, ph, pad = int(t_w + 150), 110, 34
+    img = Image.new("RGBA", (pw + 2 * pad, ph + 2 * pad), (0, 0, 0, 0))
+    sh = Image.new("L", img.size, 0); ImageDraw.Draw(sh).rounded_rectangle((pad, pad + 8, pad + pw, pad + ph + 8), ph // 2, fill=110)
+    img.putalpha(sh.filter(ImageFilter.GaussianBlur(14))); dr = ImageDraw.Draw(img)
+    dr.rounded_rectangle((pad, pad, pad + pw, pad + ph), ph // 2, fill=(255, 255, 255, 255))
+    x = pad + (pw - t_w) / 2; asc, desc = f.getmetrics(); y = pad + (ph - (asc + desc)) / 2 + 2
+    for ch, wd in zip(text, widths):
+        dr.text((x, y), ch, font=f, fill=(34, 36, 40, 255)); x += wd + track
+    return np.asarray(img).astype(np.float32) / 255
+CTA = make_cta("LEARN ABOUT YOUR HEARTPASS")
 
 # ---------------------------------------------------------------- audio
 cutwav = os.path.join(TMP, "cut.wav")
@@ -209,6 +232,7 @@ def src_frame(k):
         cur = np.frombuffer(b, np.uint8).reshape(SH, SW, 3); src_idx += 1
     return cur
 last = None
+BLUR_LAST = None
 for fi in range(int(round(TOTAL * FPS))):
     t = fi / FPS
     if t < BODY:
@@ -217,11 +241,27 @@ for fi in range(int(round(TOTAL * FPS))):
         fr = fr * 1.25 - cv2.GaussianBlur(fr, (0, 0), 1.6) * 0.25
         last = fr
     else:
-        fr = last * (1 - ease((t - BODY) / OUTRO))               # gentle fade out after the last word
-    m_ = ease((t - T_IN) / 0.5) * (1 - ease((t - T_OUT) / 0.5))
-    if m_ > 0:
-        fr = fr * (1 - m_) + pic_at(t) * m_
-    for s, e, L in caps:
+        u = t - BODY                                            # end card: soft colour blur + HeartPass button (3 s)
+        mb = ease(u / 0.7)
+        if BLUR_LAST is None: BLUR_LAST = cv2.GaussianBlur(last, (0, 0), 26) * 0.6
+        fr = last * (1 - mb) + BLUR_LAST * mb
+        ca = ease((u - 0.5) / 0.5)
+        if ca > 0:
+            y0, x0 = (H - CTA.shape[0]) // 2, (W - CTA.shape[1]) // 2
+            al = CTA[..., 3:4] * ca
+            fr[y0:y0 + CTA.shape[0], x0:x0 + CTA.shape[1]] = fr[y0:y0 + CTA.shape[0], x0:x0 + CTA.shape[1]] * (1 - al) + CTA[..., :3] * 255 * al
+    m_ = ease((t - T_IN) / 1.0) * (1 - ease((t - T_OUT) / 0.8))          # the card slides up and fades in slowly
+    if m_ > 0 and t < BODY:
+        card = cv2.resize(pic_at(t), (IW, IH), interpolation=cv2.INTER_AREA)
+        yo = IY + int(round(30 * (1 - m_)))
+        sh_ = ISHADOW * m_ * 0.8
+        ys0 = yo - 52; ys1 = min(H, ys0 + IH + 80); xs1 = min(W, IX - 40 + IW + 80)
+        fr[ys0:ys1, IX - 40:xs1] *= (1 - sh_[: ys1 - ys0, : xs1 - (IX - 40)])
+        hv = min(IH, H - yo)
+        sub = fr[yo:yo + hv, IX:IX + IW]
+        sub[:] = sub * (1 - IMASK[:hv] * m_) + card[:hv] * IMASK[:hv] * m_
+    for s, e, Lc, Ll in caps:
+        L = Ll if (T_IN <= t < T_OUT + 0.8) else Lc
         if s - 0.02 <= t < e:
             a = ease((t - s) / 0.15) * (1 - ease((t - (e - 0.15)) / 0.15))
             hh = L.shape[0]; y = CAP_BOTTOM - hh + 20
