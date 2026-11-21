@@ -17,8 +17,8 @@ TMP = os.path.join(HERE, ".tmp_clean"); os.makedirs(TMP, exist_ok=True)
 OUT = os.path.join(HERE, "output", "heartpass_podcast_clean_9x16.mp4")
 CFG = runpy.run_path(os.path.join(HERE, "config.py"))
 W, H, FPS = 1080, 1920, 25
-PW, PH, PY = 1080, 1350, 120              # picture (4:5) and its top edge; captions sit underneath it
-CAP_Y = PY + PH + 34                      # top of the caption lines
+PW, PH, PY = 1080, 1260, 236              # picture (6:7) under the explainer header; captions sit underneath it
+CAP_Y = PY + PH + 30                      # top of the caption lines
 END_CARD, END_DUR = "LEARN ABOUT YOUR HEARTPASS", 3.0
 INTER = "/usr/share/fonts/opentype/inter/"
 HL = (120, 182, 255)                      # highlight colour for key words (soft blue)
@@ -222,6 +222,71 @@ def make_cta(text):
     return np.asarray(img).astype(np.float32) / 255
 CTA = make_cta(END_CARD)
 
+# ---------------------------------------------------------------- explainer: topic header with numbered points, glossary cards
+LABEL_F = ImageFont.truetype(INTER + "Inter-SemiBold.otf", 25)
+HEAD_F = ImageFont.truetype(INTER + "Inter-Bold.otf", 44)
+NUM_F = ImageFont.truetype(INTER + "Inter-Bold.otf", 30)
+HEAD_H = PY - 16
+POINTS = [   # (word, label, number, text)
+    (0, "THE QUESTION", None, "India has fewer obese people than the US, yet more heart problems. Why?"),
+    (90, "WHY INDIANS GET MORE HEART ATTACKS", 1, "Fit people get heart attacks too"),
+    (120, "WHY INDIANS GET MORE HEART ATTACKS", 2, "It's not apples to apples"),
+    (133, "WHY INDIANS GET MORE HEART ATTACKS", 3, "A different metabolic make-up"),
+    (185, "WHY INDIANS GET MORE HEART ATTACKS", 4, "The diabetes capital of the world"),
+    (192, "WHY INDIANS GET MORE HEART ATTACKS", 5, "High-carb diet, little prevention"),
+    (207, "WHY INDIANS GET MORE HEART ATTACKS", 6, "Delay: we meet the cardiologist in the ICU"),
+]
+def _wrap(text, f, maxw):
+    lines, cur = [], ""
+    for w_ in text.split():
+        if cur and dd.textlength(cur + " " + w_, font=f) > maxw: lines.append(cur); cur = w_
+        else: cur = (cur + " " + w_).strip()
+    return lines + [cur]
+def _shadowed(img, draw_fn, blur=7):
+    sh = Image.new("L", img.size, 0); draw_fn(ImageDraw.Draw(sh), True)
+    shadow = Image.new("RGBA", img.size, (0, 0, 0, 0)); shadow.putalpha(sh.filter(ImageFilter.GaussianBlur(blur)))
+    img = Image.alpha_composite(img, shadow); draw_fn(ImageDraw.Draw(img), False); return img
+def header_layer(label, num, text):
+    img = Image.new("RGBA", (W, HEAD_H), (0, 0, 0, 0))
+    x_text = 60 + (64 if num else 0)
+    lines = _wrap(text, HEAD_F, W - x_text - 60)
+    y_text = 66 if len(lines) == 1 else 54
+    def draw(d, sh):
+        d.text((60, 22 if len(lines) > 1 else 30), label, font=LABEL_F,
+               fill=200 if sh else HL + (255,))
+        if num:
+            if not sh:
+                d.ellipse((60, y_text + 4, 108, y_text + 52), fill=HL + (255,))
+                d.text((84, y_text + 28), str(num), font=NUM_F, fill=(12, 20, 36, 255), anchor="mm")
+        for i, ln in enumerate(lines):
+            d.text((x_text, y_text + i * 54), ln, font=HEAD_F, fill=200 if sh else (255, 255, 255, 255))
+    return np.asarray(_shadowed(img, draw)).astype(np.float32) / 255
+HEADS = [(remap(words[wi][0]) - (0.0 if wi == 0 else 0.15), header_layer(lb, n, tx)) for wi, lb, n, tx in POINTS]
+
+GLOSS = [   # (word, title, body) small explainer cards over the bottom-left of the picture
+    (137, "Metabolic phenotype", "South Asians tend to develop diabetes and insulin resistance at a lower body weight."),
+    (141, "Lp(a)", "Lipoprotein(a): an inherited cholesterol particle linked to heart attacks, often higher in South Asians."),
+]
+GT_F = ImageFont.truetype(INTER + "Inter-SemiBold.otf", 32); GB_F = ImageFont.truetype(INTER + "Inter-Regular.otf", 27)
+def gloss_layer(title, body):
+    lines = _wrap(body, GB_F, 640)
+    cw, ch = 720, 40 + 42 + 36 * len(lines) + 26
+    img = Image.new("RGBA", (cw + 40, ch + 40), (0, 0, 0, 0))
+    sh = Image.new("L", img.size, 0); ImageDraw.Draw(sh).rounded_rectangle((20, 26, 20 + cw, 26 + ch), 22, fill=140)
+    img.putalpha(sh.filter(ImageFilter.GaussianBlur(12)))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((20, 20, 20 + cw, 20 + ch), 22, fill=(14, 22, 38, 215))
+    d.rounded_rectangle((20, 20, 26, 20 + ch), 3, fill=HL + (255,))
+    d.text((50, 40), title, font=GT_F, fill=HL + (255,))
+    for i, ln in enumerate(lines):
+        d.text((50, 88 + i * 36), ln, font=GB_F, fill=(240, 244, 250, 255))
+    return np.asarray(img).astype(np.float32) / 255
+GLS = []
+for gi, (wi, ti, bo) in enumerate(GLOSS):
+    s0 = remap(words[wi][0])
+    s1 = min(s0 + 5.0, remap(words[GLOSS[gi + 1][0]][0]) - 0.05) if gi + 1 < len(GLOSS) else s0 + 5.5
+    GLS.append((s0, s1, gloss_layer(ti, bo)))
+
 # ---------------------------------------------------------------- audio: cut, clean podcast voice, level
 cutwav = os.path.join(TMP, "cut.wav")
 fc_a = "".join(f"[0:a]atrim={s:.3f}:{e:.3f},asetpts=PTS-STARTPTS,afade=t=in:d=0.015,afade=t=out:st={max(0, e - s - 0.015):.3f}:d=0.015[a{i}];"
@@ -275,6 +340,20 @@ for fi in range(int(round(TOTAL * FPS))):
                         sub = fr[Y:Y + hL, X:X + wL]; al = L[: sub.shape[0], : sub.shape[1], 3:4] * aa
                         sub[:] = sub * (1 - al) + L[: sub.shape[0], : sub.shape[1], :3] * 255 * al
                 break
+        # explainer header (cross-fades to each new point)
+        cur_i = max(i for i, (s0, _) in enumerate(HEADS) if t >= s0 or i == 0)
+        s0, L = HEADS[cur_i]
+        k = ease((t - s0) / 0.45) if cur_i > 0 else 1.0
+        for LL, aa in ((HEADS[cur_i - 1][1], 1 - k) if cur_i > 0 else (None, 0), (L, k)):
+            if LL is not None and aa > 0:
+                al = LL[..., 3:4] * aa
+                fr[8:8 + HEAD_H] = fr[8:8 + HEAD_H] * (1 - al) + LL[..., :3] * 255 * al
+        for g0, g1, GL in GLS:
+            if g0 <= t < g1:
+                ga = ease((t - g0) / 0.35) * (1 - ease((t - (g1 - 0.35)) / 0.35))
+                gy = PY + PH - GL.shape[0] - 30 + int(16 * (1 - ga)); gx = 24
+                sub = fr[gy:gy + GL.shape[0], gx:gx + GL.shape[1]]; al = GL[..., 3:4] * ga
+                sub[:] = sub * (1 - al) + GL[..., :3] * 255 * al
         if NAME_T[0] <= t < NAME_T[1]:
             na = ease((t - NAME_T[0]) / 0.4) * (1 - ease((t - (NAME_T[1] - 0.4)) / 0.4))
             Y = PY + 24; al = NAME[..., 3:4] * na
