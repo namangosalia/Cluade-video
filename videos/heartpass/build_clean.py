@@ -4,7 +4,8 @@
 - small white captions underneath the picture, key words highlighted in colour (word by word)
 - gentle framing: a 4:5 window of the 16:9 camera (about 1.9x, was 2.7x + zooms) that follows the speaker
   slowly; shots showing the podcast's burned-in question title are framed so it stays out
-- the same cuts as config.py (fillers, false starts, hesitation gaps), ending on "Learn about your HeartPass"
+- the same cuts as config.py (fillers, false starts, hesitation gaps); it ends on Naman's "...in the ICU room"
+  (the rest, over the host's reaction shot, is dropped), then "Learn about your HeartPass"
 """
 import json, os, runpy, subprocess, wave
 import cv2
@@ -51,7 +52,7 @@ for i, q in enumerate(np.append(rms < SIL, False)):
             if q1 - q0 > k: cuts.append((q0 + k / 2, q1 - k / 2))
         s_ = None
 cuts += CFG["CUT_TIMES"]
-END_T = words[-1][1] + 0.35
+END_T = 83.70                              # ends on "...in the ICU room" (waveform: "room" decays by 83.68)
 cuts.append((END_T, DUR + 1))
 cuts.sort(); merged = []
 for s, e in cuts:
@@ -139,9 +140,7 @@ GROUPS = [
     (192, 197, "We have a [high-carb diet.]"),
     (197, 203, "We don't do [prevention] that much."),
     (207, 217, "I think that [delay] is also one of the aspects,"),
-    (217, 227, "that we are meeting our cardiologist in the [ICU room,]"),
-    (227, 233, "which should [not] be the case,"),
-    (233, 241, "even after having the [best medical facilities.]"),
+    (217, 227, "that we are meeting our cardiologist in the [ICU room.]"),
 ]
 
 def tokens(text):
