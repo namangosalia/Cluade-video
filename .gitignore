@@ -3,3 +3,4 @@ __pycache__/
 edit/.tmp/
 .tmp_montage/
 videos/heartpass/prepped/
+.tmp_clean/
