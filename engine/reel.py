@@ -487,11 +487,14 @@ def audio_vis(t):
     return tt.to_hlg_region(tt.with_shadow(img, 8, 1.4))
 
 def make_cta(text):
-    f = ImageFont.truetype(FONT_DIR + "Inter-SemiBold.otf", 38)
     d = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    track = 6
-    widths = [d.textlength(ch, font=f) for ch in text]
-    tw = sum(widths) + track * (len(text) - 1)
+    size, track = 38, 6
+    while True:                                     # longer buttons ("LEARN ABOUT YOUR HEARTPASS") shrink to fit
+        f = ImageFont.truetype(FONT_DIR + "Inter-SemiBold.otf", size)
+        widths = [d.textlength(ch, font=f) for ch in text]
+        tw = sum(widths) + track * (len(text) - 1)
+        if tw + 140 <= 860 or size <= 28: break
+        size -= 1; track = 5 if size < 35 else track
     pw, ph, pad = int(tw + 2 * 70), 104, 30
     img = Image.new("RGBA", (pw + 2 * pad, ph + 2 * pad), (0, 0, 0, 0))
     sh = Image.new("L", img.size, 0)
