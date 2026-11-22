@@ -38,7 +38,8 @@ B1 = 28.52
 
 # ---------------------------------------------------------------- edit: precap (clip 2), clip 1, clip 3
 CLIPS = [(B1, 32.92), (0.42, 28.42), (34.27, 47.32)]
-CUTS = [(2.30, 2.84)]
+CUTS = [(2.30, 2.84),                          # repeated "that"
+        (35.98, 37.70)]                         # "It is not happening." (soft-blended join)
 rms = np.array([20 * np.log10(np.sqrt(np.mean(a16[i:i + 400] ** 2)) + 1e-9) for i in range(0, len(a16), 160)])
 SIL = min(-30.0, float(np.percentile(rms[rms > -90], 90)) - 20.0)
 ends = [wd[1] for wd in words if wd[2].strip().endswith((".", "?", "!"))]
@@ -51,7 +52,7 @@ for i, q in enumerate(np.append(rms < SIL, False)):
             k = 0.60 if any(e - 0.2 <= q0 <= e + 0.35 for e in ends) else 0.40
             if q1 - q0 > k: CUTS.append((q0 + k / 2, q1 - k / 2))
         s_ = None
-GAP = {0: 0.25 + 2.0 + 0.35, 1: 0.45}         # precap -> 2 s heart-monitor flatline insert -> clip 1
+GAP = {0: 0.10 + 2.0 - 0.40, 1: 0.45}         # precap -> 2 s heart monitor (overlapping both neighbours) -> clip 1
 timeline, t = [], 0.0
 for ci, (c0, c1) in enumerate(CLIPS):
     if ci: t += GAP[ci - 1]
@@ -150,7 +151,7 @@ CAPS = [(73, 76, "Cardiovascular disease still remains"), (77, 84, "the leading 
         (32, 40, "Both with acute MI, which is the heart attack."), (41, 49, "The doctor, unfortunately, will have to save the 35-year-old"),
         (50, 57, "because he is packed. He doesn't have time."), (58, 65, "He'll have to let go the 75-year-old"),
         (66, 72, "if we don't solve this problem sooner."),
-        (87, 91, "This is the biggest pandemic."), (92, 95, "It is not happening."), (96, 101, "There is no sudden heart attack."),
+        (87, 91, "This is the biggest pandemic."), (96, 101, "There is no sudden heart attack."),
         (102, 109, "It's a build-up process of 10 years,"), (110, 117, "15 years, 5 years, based on your symptoms."),
         (118, 123, "And we really must catch that.")]
 dd = ImageDraw.Draw(Image.new("L", (1, 1)))
@@ -280,7 +281,8 @@ CTA = make_cta("LEARN MORE")
 
 # ---------------------------------------------------------------- audio (same edit; clips fade softly at their edges)
 # ---------------------------------------------------------------- 2 s heart-monitor insert: green beats turn red and go flat
-ECG_T0 = CLIP_SPAN[0][1] + 0.25                 # starts just after "...in the world."
+ECG_T0 = CLIP_SPAN[0][1] + 0.10                 # starts just after "...in the world."
+ECG_X = 0.40                                     # continuous crossfades in and out of it (no black)
 ECG_DUR = 2.0
 ECG_Y = H // 2
 GREEN, RED_ = np.array([70, 214, 120], np.float32), np.array([224, 42, 44], np.float32)
@@ -314,7 +316,6 @@ def ecg_frame(u):
             cv2.circle(lay, tuple(pts[n - 1]), 9, tuple(float(v) for v in np.minimum(ECG_COL[n - 1] * 1.4, 255)), -1, cv2.LINE_AA)
     glow = cv2.GaussianBlur(lay, (0, 0), 12) * 1.6
     fr = ECG_BG + glow + lay
-    fr *= ease(u / 0.25) * (1 - ease((u - (ECG_DUR - 0.25)) / 0.25))
     return fr
 
 # monitor sound: a beep on each beat (fading), then the flatline tone
@@ -364,6 +365,8 @@ enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_f
                         "-colorspace", "bt709", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-t", f"{TOTAL:.3f}", OUT],
                        stdin=subprocess.PIPE)
 XF = 0.6                                           # crossfade between clips
+JOIN_T = out_of(37.70) - 0.01
+JOIN_FR = None
 def view_at(tn):
     src, ci = src_of(min(tn, BODY - 1 / FPS))
     return render_view(min(int(round(src * FPS)), N - 1), mode_at(tn)), ci
@@ -373,16 +376,18 @@ for fi in range(int(round(TOTAL * FPS))):
     if tn < BODY:
         fr, ci = view_at(tn)
         # crossfade into the next clip: during the gap before clip ci+1 starts, blend the held frame with its first frame
-        if ECG_T0 - 0.25 <= tn < CLIP_SPAN[1][0]:                  # precap -> heart monitor -> clip 1
+        S1 = CLIP_SPAN[1][0]
+        if ECG_T0 <= tn < S1 + ECG_X:                               # precap -> heart monitor -> clip 1, one continuous move
             u = tn - ECG_T0
-            if u < 0:
-                fr = fr * (1 - ease((tn - (ECG_T0 - 0.25)) / 0.25))
-            elif u < ECG_DUR:
-                fr = ecg_frame(u)
-            else:
-                k2 = min(int(round(first_src(1) * FPS)), N - 1)
-                fr = render_view(k2, mode_at(CLIP_SPAN[1][0] + 0.01)) * ease((tn - (ECG_T0 + ECG_DUR)) / (CLIP_SPAN[1][0] - ECG_T0 - ECG_DUR))
-            enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes()); continue
+            ecg = ecg_frame(min(u, ECG_DUR - 1 / FPS))
+            if u < ECG_X: fr = fr * (1 - ease(u / ECG_X)) + ecg * ease(u / ECG_X)
+            elif tn < S1: fr = ecg
+            else: fr = ecg * (1 - ease((tn - S1) / ECG_X)) + fr * ease((tn - S1) / ECG_X)
+            if tn < S1:
+                enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes()); continue
+        if JOIN_FR is not None and JOIN_T <= tn < JOIN_T + 0.3:     # the "It is not happening" cut: a short soft blend
+            m = ease((tn - JOIN_T) / 0.3)
+            fr = JOIN_FR * (1 - m) + fr * m
         for nc in (2,):
             s0 = CLIP_SPAN[nc][0]
             if s0 - XF <= tn < s0 and ci == nc - 1:
@@ -390,6 +395,7 @@ for fi in range(int(round(TOTAL * FPS))):
                 m = ease((tn - (s0 - XF)) / XF)
                 fr = fr * (1 - m) + render_view(k2, mode_at(s0 + 0.01)) * m
         if tn < 0.5: fr = fr * ease(tn / 0.5)
+        if JOIN_T - 0.08 <= tn < JOIN_T: JOIN_FR = fr.copy()
         last = fr.copy()
         for c_i, c in enumerate(CALLS):
             c.draw(fr, tn, CALLS[c_i + 1].t0 if c_i + 1 < len(CALLS) else None)
