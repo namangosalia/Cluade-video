@@ -1,7 +1,8 @@
 """Version 2, in the style of Naman's reference screen recording (videos/oneliner/reference_video.mp4):
 
 - PRECAP: clip 2 first ("Cardiovascular disease still remains the leading cause of mortality in the world."),
-  as a quote-style opening statement; then clip 1, then clip 3, joined by soft crossfades
+  as a quote-style opening statement; then a 2 s heart-monitor insert (green beats turn red and go flat, with
+  monitor beeps and the flatline tone); then clip 1, then clip 3, joined by soft crossfades
 - framing changes on phrases like the reference: medium vertical shot, closer shot, and a split layout
   (the wide podcast shot on top, Naman below)
 - small sentence captions low on screen + kinetic callouts on the left: a small letter-spaced tag,
@@ -50,7 +51,7 @@ for i, q in enumerate(np.append(rms < SIL, False)):
             k = 0.60 if any(e - 0.2 <= q0 <= e + 0.35 for e in ends) else 0.40
             if q1 - q0 > k: CUTS.append((q0 + k / 2, q1 - k / 2))
         s_ = None
-GAP = {0: 0.55, 1: 0.45}                      # breath between clips (precap -> clip 1 a touch longer)
+GAP = {0: 0.25 + 2.0 + 0.35, 1: 0.45}         # precap -> 2 s heart-monitor flatline insert -> clip 1
 timeline, t = [], 0.0
 for ci, (c0, c1) in enumerate(CLIPS):
     if ci: t += GAP[ci - 1]
@@ -184,7 +185,8 @@ CALLOUTS = [
                   (77, "big", "LEADING CAUSE", CYAN), (80, "big", "OF MORTALITY.", WHITE)]),
     (15, 31, [(15, "tag", "IN THE NEXT DECADE, DOCTORS WILL HAVE", WHITE), (18, "big", "TWO PEOPLE", CYAN),
               (23, "list", "35 YEARS OLD", WHITE), (29, "list", "75 YEARS OLD", WHITE)]),
-    (32, 40, [(32, "tag", "BOTH WITH", WHITE), (34, "big", "ACUTE MI", CYAN), (38, "sub", "the heart attack", WHITE)]),
+    (32, 40, [(32, "tag", "BOTH WITH", WHITE), (34, "big", "ACUTE MI", WHITE), (36, "tag", "WHICH IS THE", WHITE),
+              (38, "big", "HEART ATTACK", CYAN)]),
     (43, 57, [(43, "tag", "THE DOCTOR WILL HAVE TO", WHITE), (46, "big", "SAVE", CYAN), (47, "mid", "THE 35-YEAR-OLD", WHITE)]),
     (58, 65, [(58, "tag", "AND", WHITE), (61, "big", "LET GO", CYAN), (63, "mid", "THE 75-YEAR-OLD", WHITE)]),
     (66, 72, [(66, "tag", "IF WE DON'T SOLVE THIS PROBLEM", WHITE), (72, "big", "SOONER.", CYAN)]),
@@ -277,6 +279,59 @@ def make_cta(text):
 CTA = make_cta("LEARN MORE")
 
 # ---------------------------------------------------------------- audio (same edit; clips fade softly at their edges)
+# ---------------------------------------------------------------- 2 s heart-monitor insert: green beats turn red and go flat
+ECG_T0 = CLIP_SPAN[0][1] + 0.25                 # starts just after "...in the world."
+ECG_DUR = 2.0
+ECG_Y = H // 2
+GREEN, RED_ = np.array([70, 214, 120], np.float32), np.array([224, 42, 44], np.float32)
+BEATS = [(170, 1.00), (470, 0.62), (740, 0.26)]  # x of each beat, amplitude (fading)
+def pqrst(u):
+    """one heartbeat shape, u in px from beat centre; returns upward displacement in px (amplitude 1)"""
+    return (14 * np.exp(-((u + 52) / 11) ** 2) - 26 * np.exp(-((u + 9) / 4) ** 2) + 230 * np.exp(-(u / 5) ** 2)
+            - 62 * np.exp(-((u - 10) / 5) ** 2) + 34 * np.exp(-((u - 62) / 17) ** 2))
+XS_ = np.arange(0, W, dtype=np.float32)
+ECG_V = np.zeros_like(XS_)
+for bx, amp in BEATS: ECG_V += amp * pqrst(XS_ - bx)
+ECG_COL = np.array([GREEN * (1 - k) + RED_ * k for k in np.clip((XS_ - 260) / 380, 0, 1)], np.float32)
+HEAD_END = 1.55                                   # the trace reaches the right edge here, then rests as a flat red line
+_yy, _xx = np.mgrid[0:H, 0:W].astype(np.float32)
+ECG_BG = (np.full((H, W, 3), 16, np.float32) + np.random.default_rng(3).normal(0, 2.2, (H, W, 1)).astype(np.float32)) * \
+         (1 - 0.35 * (((_xx - W / 2) / W) ** 2 + ((_yy - H / 2) / H) ** 2) * 2)[..., None]
+def ecg_frame(u):
+    head = W * min(u / HEAD_END, 1.0)
+    img = np.zeros((H, W), np.float32); col = np.zeros((H, W, 3), np.float32)
+    pts = np.stack([XS_, ECG_Y - ECG_V], 1).astype(np.int32)
+    n = int(head)
+    lay = np.zeros((H, W, 3), np.float32)
+    if n > 1:
+        age = (head - XS_[:n]) / W                               # older trace dims a little, like a monitor
+        fade = np.clip(1 - age * 0.55, 0.35, 1)
+        for i in range(1, n):
+            c = tuple(float(v) for v in ECG_COL[i] * fade[i])
+            cv2.line(lay, tuple(pts[i - 1]), tuple(pts[i]), c, 5, cv2.LINE_AA)
+        if u < HEAD_END:                                           # bright head
+            cv2.circle(lay, tuple(pts[n - 1]), 9, tuple(float(v) for v in np.minimum(ECG_COL[n - 1] * 1.4, 255)), -1, cv2.LINE_AA)
+    glow = cv2.GaussianBlur(lay, (0, 0), 12) * 1.6
+    fr = ECG_BG + glow + lay
+    fr *= ease(u / 0.25) * (1 - ease((u - (ECG_DUR - 0.25)) / 0.25))
+    return fr
+
+# monitor sound: a beep on each beat (fading), then the flatline tone
+def ecg_audio(sr=48000):
+    n = int(ECG_DUR * sr); t_ = np.arange(n) / sr; y = np.zeros(n, np.float32)
+    for bx, amp in BEATS:
+        tb = HEAD_END * bx / W; m = (t_ >= tb) & (t_ < tb + 0.13)
+        env = np.sin(np.pi * np.clip((t_ - tb) / 0.13, 0, 1)) ** 0.5
+        y += (np.sin(2 * np.pi * 1000 * t_) * env * m * 0.22 * (0.5 + 0.5 * amp)).astype(np.float32)
+    tf = HEAD_END * 860 / W
+    flat = (t_ >= tf) * np.clip((t_ - tf) / 0.05, 0, 1) * (1 - np.clip((t_ - (ECG_DUR - 0.35)) / 0.35, 0, 1))
+    y += (np.sin(2 * np.pi * 1000 * t_) * flat * 0.20).astype(np.float32)
+    return y
+ecg_wav = os.path.join(TMP, "ecg.wav")
+with wave.open(ecg_wav, "wb") as wf:
+    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(48000)
+    wf.writeframes((np.clip(ecg_audio(), -1, 1) * 32767).astype("<i2").tobytes())
+
 cutwav = os.path.join(TMP, "cut_v2.wav")
 fl = []
 for i, (o0, o1, s, ci) in enumerate(timeline):
@@ -285,8 +340,9 @@ for i, (o0, o1, s, ci) in enumerate(timeline):
     fo = 0.22 if last_of else 0.015
     fl.append(f"[0:a]atrim={s:.3f}:{s + o1 - o0:.3f},asetpts=PTS-STARTPTS,afade=t=in:d={0.06 if first_of else 0.015},"
               f"afade=t=out:st={max(0, o1 - o0 - fo):.3f}:d={fo},adelay={int(round(o0 * 1000))}:all=1[a{i}];")
-mix = "".join(fl) + "".join(f"[a{i}]" for i in range(len(timeline))) + f"amix=inputs={len(timeline)}:normalize=0,apad=whole_dur={TOTAL:.3f}[a]"
-subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", comb, "-filter_complex", mix, "-map", "[a]", "-ar", "48000", "-t", f"{TOTAL:.3f}", cutwav], check=True)
+fl.append(f"[1:a]adelay={int(round(ECG_T0 * 1000))}:all=1[ecg];")
+mix = "".join(fl) + "".join(f"[a{i}]" for i in range(len(timeline))) + f"[ecg]amix=inputs={len(timeline) + 1}:normalize=0,apad=whole_dur={TOTAL:.3f}[a]"
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", comb, "-i", ecg_wav, "-filter_complex", mix, "-map", "[a]", "-ar", "48000", "-t", f"{TOTAL:.3f}", cutwav], check=True)
 VOICE = ("highpass=f=70,equalizer=f=250:t=q:w=1:g=-1.5,equalizer=f=3200:t=q:w=1.2:g=2,highshelf=f=9000:g=1.5,"
          "deesser=i=0.3,acompressor=threshold=0.1:ratio=2.2:attack=8:release=160:makeup=1.4,loudnorm=I=-14:TP=-1:LRA=7")
 
@@ -316,7 +372,17 @@ for fi in range(int(round(TOTAL * FPS))):
     if tn < BODY:
         fr, ci = view_at(tn)
         # crossfade into the next clip: during the gap before clip ci+1 starts, blend the held frame with its first frame
-        for nc in (1, 2):
+        if ECG_T0 - 0.25 <= tn < CLIP_SPAN[1][0]:                  # precap -> heart monitor -> clip 1
+            u = tn - ECG_T0
+            if u < 0:
+                fr = fr * (1 - ease((tn - (ECG_T0 - 0.25)) / 0.25))
+            elif u < ECG_DUR:
+                fr = ecg_frame(u)
+            else:
+                k2 = min(int(round(first_src(1) * FPS)), N - 1)
+                fr = render_view(k2, mode_at(CLIP_SPAN[1][0] + 0.01)) * ease((tn - (ECG_T0 + ECG_DUR)) / (CLIP_SPAN[1][0] - ECG_T0 - ECG_DUR))
+            enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes()); continue
+        for nc in (2,):
             s0 = CLIP_SPAN[nc][0]
             if s0 - XF <= tn < s0 and ci == nc - 1:
                 k2 = min(int(round(first_src(nc) * FPS)), N - 1)
