@@ -3,7 +3,7 @@ keynote on top, DD News (Naman speaking) below. (Earlier version: side by side, 
 
 - both videos untouched (no crop, no grade), each in its own panel with its label
 - sound: only the DD News clip (Naman speaking); the keynote clip is muted
-- ends on a 2 s "As featured on DD News" card (the DD News logo only, softly animated)
+- ends on the supplied DD News live-stream slate for 2 s (gentle push-in, live pulse, embers)
 - captions under the panels: the same words he speaks (Hindi / English, in English letters), average size,
   key words highlighted
 """
@@ -128,22 +128,31 @@ EMB = [(_rng.uniform(0, W), _rng.uniform(0, H), _rng.uniform(40, 120), _rng.unif
 def over(fr, L, x, y, a):
     hh, ww = L.shape[:2]; sub = fr[y:y + hh, x:x + ww]; al = L[..., 3:4] * a
     sub[:] = sub * (1 - al) + L[..., :3] * 255 * al
+# the supplied DD News live-stream slate, used whole: centred over a blurred, darkened fill of itself
+SLATE = np.asarray(Image.open(os.path.join(HERE, "img", "dd_news_logo_source.jpg")).convert("RGB")).astype(np.float32)
+_sw = W; _sh = int(round(SLATE.shape[0] * W / SLATE.shape[1]))
+_fill = cv2.resize(SLATE, (int(SLATE.shape[1] * H / SLATE.shape[0]), H), interpolation=cv2.INTER_AREA)
+_fx = (_fill.shape[1] - W) // 2
+SLATE_BG = cv2.GaussianBlur(_fill[:, _fx:_fx + W], (0, 0), 30) * 0.45
+LIVE_C = (940, 190)                                  # the live "play" icon in the slate (source px)
 def end_card(u):
-    fr = END_BG * (1.0 + 0.05 * np.sin(u * 6.0))                    # slow breathing light
-    fr = fr.copy()
-    for x, y, v, r in EMB:                                          # embers drifting up
+    fr = SLATE_BG.copy()
+    for x, y, v, r in EMB:                                          # embers drifting up in the fill
         yy = int((y - v * u * 2.2) % H); xx = int(x + 12 * np.sin(u * 2 + y))
         cv2.circle(fr, (xx, yy), int(r), (255, 120, 40), -1, cv2.LINE_AA)
-    sc = 0.92 + 0.08 * ease(u / 1.3)
-    lw, lh = int(720 * sc), int(804 * sc)
-    lg = cv2.resize(LOGO_F, (lw, lh), interpolation=cv2.INTER_AREA); la_ = cv2.resize(LOGO_A[..., 0], (lw, lh))[..., None]
-    sweep = np.clip(1 - np.abs(np.arange(lw)[None, :] - (u - 0.5) * lw * 1.6) / 90, 0, 1)[..., None] * 0.35   # light sweep
-    lg = np.clip(lg * (1 + sweep), 0, 255)
-    x0, y0 = (W - lw) // 2, 520 + (804 - lh) // 2
-    a = ease(u / 0.4)
-    sub = fr[y0:y0 + lh, x0:x0 + lw]; sub[:] = sub * (1 - la_ * a) + lg * la_ * a
-    over(fr, TAG, 0, 380, ease((u - 0.15) / 0.35))
-    over(fr, NAME, 0, 1380, ease((u - 0.45) / 0.35))
+    z = 1.0 + 0.04 * ease(u / END)                                  # slow push-in
+    sw, sh = int(_sw * z), int(_sh * z)
+    sl = cv2.resize(SLATE, (sw, sh), interpolation=cv2.INTER_AREA)
+    # live pulse: a soft red glow breathing around the play icon
+    k = sw / SLATE.shape[1]
+    cx, cy = int(LIVE_C[0] * k), int(LIVE_C[1] * k)
+    yy_, xx_ = np.mgrid[0:sh, 0:sw]
+    pulse = 0.5 + 0.5 * np.sin(u * 2 * np.pi * 1.4)
+    glow = np.exp(-(((xx_ - cx) ** 2 + (yy_ - cy) ** 2) / (2 * (60 * k) ** 2)))[..., None] * pulse * 0.55
+    sl = np.clip(sl + glow * np.array([255, 70, 40], np.float32), 0, 255)
+    x0 = (W - sw) // 2; y0 = (H - sh) // 2
+    cx0, cy0 = max(0, x0), max(0, y0)
+    fr[cy0:cy0 + min(sh, H), cx0:cx0 + min(sw, W)] = sl[cy0 - y0:cy0 - y0 + min(sh, H), cx0 - x0:cx0 - x0 + min(sw, W)]
     return fr * (1 - ease((u - (END - 0.3)) / 0.3))                 # ends cleanly at 2 s
 
 la = lb = None
