@@ -1,6 +1,6 @@
 """Version 2, in the style of Naman's reference screen recording (videos/oneliner/reference_video.mp4):
 
-- PRECAP: clip 2 first ("Cardiovascular disease still remains the leading cause of mortality in the world."),
+- PRECAP (graded dark, black-and-white and cinematic, like a trailer): clip 2 first ("Cardiovascular disease still remains the leading cause of mortality in the world."),
   as a quote-style opening statement; then a 2 s heart-monitor insert (green beats turn red and go flat, with
   monitor beeps and the flatline tone); then clip 1, then clip 3, joined by soft crossfades
 - framing changes on phrases like the reference: medium vertical shot, closer shot, and a split layout
@@ -364,6 +364,22 @@ enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_f
                         "-maxrate", "14M", "-bufsize", "28M", "-pix_fmt", "yuv420p", "-color_primaries", "bt709", "-color_trc", "bt709",
                         "-colorspace", "bt709", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-t", f"{TOTAL:.3f}", OUT],
                        stdin=subprocess.PIPE)
+# ---------------------------------------------------------------- precap look: dark cinematic black & white (trailer)
+_vy, _vx = np.mgrid[0:H, 0:W].astype(np.float32)
+TR_VIG = np.clip(1 - 0.85 * (((_vx - W / 2) / (W * 0.75)) ** 2 + ((_vy - H * 0.45) / (H * 0.62)) ** 2), 0.25, 1)[..., None]
+_lut = np.clip(np.linspace(0, 1, 256), 0, 1)
+_lut = 1 / (1 + np.exp(-9 * (_lut - 0.48)))                       # strong S-curve: deep blacks, bright highlights
+_lut = ((_lut - _lut[0]) / (_lut[-1] - _lut[0]) * 0.92 + 0.02) * 255
+TR_LUT = _lut.astype(np.float32)
+def trailer_grade(fr, fi):
+    y = fr[..., 0] * 0.299 + fr[..., 1] * 0.587 + fr[..., 2] * 0.114
+    y = TR_LUT[np.clip(y, 0, 255).astype(np.uint8)] * 0.82            # darker overall
+    g = np.stack([y * 0.97, y * 0.99, y * 1.03], -1)                    # a hint of cool steel
+    g = g * TR_VIG
+    grain = np.random.default_rng(fi).normal(0, 7, (H // 2, W // 2)).astype(np.float32)
+    g += cv2.resize(grain, (W, H), interpolation=cv2.INTER_LINEAR)[..., None]
+    return g
+
 XF = 0.6                                           # crossfade between clips
 JOIN_T = out_of(37.70) - 0.01
 JOIN_FR = None
@@ -375,6 +391,7 @@ for fi in range(int(round(TOTAL * FPS))):
     tn = fi / FPS
     if tn < BODY:
         fr, ci = view_at(tn)
+        if ci == 0: fr = trailer_grade(fr, fi)                     # precap: dark, black-and-white, cinematic
         # crossfade into the next clip: during the gap before clip ci+1 starts, blend the held frame with its first frame
         S1 = CLIP_SPAN[1][0]
         if ECG_T0 <= tn < S1 + ECG_X:                               # precap -> heart monitor -> clip 1, one continuous move
