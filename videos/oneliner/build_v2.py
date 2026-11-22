@@ -194,7 +194,7 @@ CALLOUTS = [
                 (112, "list", "5 YEARS", WHITE), (114, "sub", "based on your symptoms", WHITE)]),
     (118, 123, [(120, "tag", "WE REALLY MUST", WHITE), (122, "big", "CATCH THAT.", CYAN)]),
 ]
-CX, CY0 = 64, 760                                   # callout block: left, from this y downward
+CX, CY0 = 64, 960                                   # callout block: left, from this y downward
 
 def spaced(d, x, y, text, f, fill, track=4):
     for ch in text:
