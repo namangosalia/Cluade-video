@@ -300,14 +300,15 @@ ECG_BG = (np.full((H, W, 3), 16, np.float32) + np.random.default_rng(3).normal(0
 def ecg_frame(u):
     head = W * min(u / HEAD_END, 1.0)
     img = np.zeros((H, W), np.float32); col = np.zeros((H, W, 3), np.float32)
-    pts = np.stack([XS_, ECG_Y - ECG_V], 1).astype(np.int32)
+    kf = ease((u - HEAD_END) / 0.3)                                # after the sweep: the whole trace settles flat and red
+    pts = np.stack([XS_, ECG_Y - ECG_V * (1 - kf)], 1).astype(np.int32)
     n = int(head)
     lay = np.zeros((H, W, 3), np.float32)
     if n > 1:
         age = (head - XS_[:n]) / W                               # older trace dims a little, like a monitor
         fade = np.clip(1 - age * 0.55, 0.35, 1)
         for i in range(1, n):
-            c = tuple(float(v) for v in ECG_COL[i] * fade[i])
+            c = tuple(float(v) for v in (ECG_COL[i] * (1 - kf) + RED_ * kf) * (fade[i] * (1 - kf) + kf))
             cv2.line(lay, tuple(pts[i - 1]), tuple(pts[i]), c, 5, cv2.LINE_AA)
         if u < HEAD_END:                                           # bright head
             cv2.circle(lay, tuple(pts[n - 1]), 9, tuple(float(v) for v in np.minimum(ECG_COL[n - 1] * 1.4, 255)), -1, cv2.LINE_AA)
