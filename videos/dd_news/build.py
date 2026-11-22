@@ -3,6 +3,7 @@ keynote on top, DD News (Naman speaking) below. (Earlier version: side by side, 
 
 - both videos untouched (no crop, no grade), each in its own panel with its label
 - sound: only the DD News clip (Naman speaking); the keynote clip is muted
+- ends on a 2 s "As featured on DD News" card (the DD News logo only, softly animated)
 - captions under the panels: the same words he speaks (Hindi / English, in English letters), average size,
   key words highlighted
 """
@@ -95,12 +96,64 @@ def reader(path, w, h):
                              "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
 da, db = reader(A_SRC, PW, PH), reader(B_SRC, PW, PH)
 enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
-                        "-i", A_SRC, "-map", "0:v", "-map", "1:a", "-af", "loudnorm=I=-14:TP=-1:LRA=7",
+                        "-i", A_SRC, "-map", "0:v", "-map", "1:a", "-af", "afade=t=out:st=%.3f:d=0.4,apad,loudnorm=I=-14:TP=-1:LRA=7" % (DUR - 0.4),
                         "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-color_primaries", "bt709",
                         "-color_trc", "bt709", "-colorspace", "bt709", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
-                        "-t", f"{DUR:.3f}", OUT], stdin=subprocess.PIPE)
+                        "-t", f"{DUR + 2.0:.3f}", OUT], stdin=subprocess.PIPE)
+# ---------------------------------------------------------------- 2 s ending: "As featured on DD News" (logo only, softly animated)
+END = 2.0
+# smoky dark background made procedurally (no text), embers on top; the logo is a clean cut-out of the supplied image
+_n = np.random.default_rng(11)
+_sm = sum(cv2.resize(_n.normal(0, 1, (H // s_, W // s_)).astype(np.float32), (W, H), interpolation=cv2.INTER_CUBIC) * w_
+          for s_, w_ in ((120, 1.0), (40, 0.6), (12, 0.3)))
+_sm = (_sm - _sm.min()) / (_sm.max() - _sm.min())
+_yy, _xx = np.mgrid[0:H, 0:W].astype(np.float32)
+END_BG = (np.array([20, 24, 30], np.float32) + _sm[..., None] * np.array([38, 44, 52], np.float32)
+          + np.exp(-(((_xx - W * 0.2) / 500) ** 2 + ((_yy - H * 0.95) / 380) ** 2))[..., None] * np.array([90, 30, 10], np.float32))
+LOGO_IMG = Image.open(os.path.join(HERE, "img", "dd_news_logo_cutout.png")).resize((720, 804), Image.LANCZOS)
+LOGO_RGBA = np.asarray(LOGO_IMG).astype(np.float32)
+LOGO_F, LOGO_A = LOGO_RGBA[..., :3], LOGO_RGBA[..., 3:4] / 255
+_tag = Image.new("RGBA", (W, 120), (0, 0, 0, 0)); _d = ImageDraw.Draw(_tag); _f = F("Inter-SemiBold.otf", 32)
+_t = "AS FEATURED ON"; _w = sum(_d.textlength(c, font=_f) + 9 for c in _t) - 9; _x = (W - _w) / 2
+for c in _t:
+    _d.text((_x, 40), c, font=_f, fill=(255, 255, 255, 235)); _x += _d.textlength(c, font=_f) + 9
+_d.line((W / 2 - 50, 100, W / 2 + 50, 100), fill=(240, 140, 40, 255), width=3)
+TAG = np.asarray(_tag).astype(np.float32) / 255
+_nm = Image.new("RGBA", (W, 120), (0, 0, 0, 0)); _d = ImageDraw.Draw(_nm)
+_d.text((W / 2, 20), "Naman Gosalia", font=F("Inter-SemiBold.otf", 44), fill=(255, 255, 255, 255), anchor="ma")
+_d.text((W / 2, 76), "Founder of AnginaX  ·  April 6, 2025", font=F("Inter-Regular.otf", 28), fill=(210, 214, 222, 255), anchor="ma")
+NAME = np.asarray(_nm).astype(np.float32) / 255
+_rng = np.random.default_rng(7)
+EMB = [(_rng.uniform(0, W), _rng.uniform(0, H), _rng.uniform(40, 120), _rng.uniform(1.5, 4.0)) for _ in range(70)]
+def over(fr, L, x, y, a):
+    hh, ww = L.shape[:2]; sub = fr[y:y + hh, x:x + ww]; al = L[..., 3:4] * a
+    sub[:] = sub * (1 - al) + L[..., :3] * 255 * al
+def end_card(u):
+    fr = END_BG * (1.0 + 0.05 * np.sin(u * 6.0))                    # slow breathing light
+    fr = fr.copy()
+    for x, y, v, r in EMB:                                          # embers drifting up
+        yy = int((y - v * u * 2.2) % H); xx = int(x + 12 * np.sin(u * 2 + y))
+        cv2.circle(fr, (xx, yy), int(r), (255, 120, 40), -1, cv2.LINE_AA)
+    sc = 0.92 + 0.08 * ease(u / 1.3)
+    lw, lh = int(720 * sc), int(804 * sc)
+    lg = cv2.resize(LOGO_F, (lw, lh), interpolation=cv2.INTER_AREA); la_ = cv2.resize(LOGO_A[..., 0], (lw, lh))[..., None]
+    sweep = np.clip(1 - np.abs(np.arange(lw)[None, :] - (u - 0.5) * lw * 1.6) / 90, 0, 1)[..., None] * 0.35   # light sweep
+    lg = np.clip(lg * (1 + sweep), 0, 255)
+    x0, y0 = (W - lw) // 2, 520 + (804 - lh) // 2
+    a = ease(u / 0.4)
+    sub = fr[y0:y0 + lh, x0:x0 + lw]; sub[:] = sub * (1 - la_ * a) + lg * la_ * a
+    over(fr, TAG, 0, 380, ease((u - 0.15) / 0.35))
+    over(fr, NAME, 0, 1380, ease((u - 0.45) / 0.35))
+    return fr * (1 - ease((u - (END - 0.3)) / 0.3))                 # ends cleanly at 2 s
+
 la = lb = None
-for fi in range(int(round(DUR * FPS))):
+last = None
+for fi in range(int(round((DUR + END) * FPS))):
+    if fi >= int(round(DUR * FPS)):
+        u = fi / FPS - DUR
+        fr = end_card(u)
+        if u < 0.4: fr = last * (1 - ease(u / 0.4)) + fr * ease(u / 0.4)
+        enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes()); continue
     t = fi / FPS
     ba = da.stdout.read(PW * PH * 3); bb = db.stdout.read(PW * PH * 3)
     if len(ba) == PW * PH * 3: la = np.frombuffer(ba, np.uint8).reshape(PH, PW, 3).astype(np.float32)
@@ -113,7 +166,8 @@ for fi in range(int(round(DUR * FPS))):
             a = ease((t - s) / 0.15) * (1 - ease((t - (e - 0.15)) / 0.15)) if e < DUR else ease((t - s) / 0.15)
             al = L[..., 3:4] * a
             fr[CAP_Y:CAP_Y + 160] = fr[CAP_Y:CAP_Y + 160] * (1 - al) + L[..., :3] * 255 * al
-    fr *= ease(t / 0.4) * (1 - ease((t - (DUR - 0.5)) / 0.5))       # soft fade in / out
+    fr *= ease(t / 0.4)                                               # soft fade in; the ending card takes over at the end
+    last = fr.copy()
     enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes())
 enc.stdin.close(); enc.wait(); da.terminate(); db.terminate()
 print("wrote", OUT)
