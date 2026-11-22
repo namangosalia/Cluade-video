@@ -184,12 +184,11 @@ F_TAG = ImageFont.truetype(INTER + "Inter-SemiBold.otf", 24); F_SUB = ImageFont.
 CALLOUTS = [
     (73, 84 + 0, [(73, "quote", "", CYAN), (73, "tag", "CARDIOVASCULAR DISEASE", WHITE), (75, "big", "STILL THE", WHITE),
                   (77, "big", "LEADING CAUSE", CYAN), (80, "big", "OF MORTALITY.", WHITE)]),
-    (15, 31, [(15, "tag", "IN THE NEXT DECADE, DOCTORS WILL HAVE", WHITE), (18, "big", "TWO PEOPLE", CYAN),
-              (23, "list", "35 YEARS OLD", WHITE), (29, "list", "75 YEARS OLD", WHITE)]),
+    (15, 31, [(15, "tag", "IN THE NEXT DECADE, DOCTORS WILL HAVE", WHITE), (18, "big", "TWO PEOPLE", CYAN)]),
     (32, 40, [(32, "tag", "BOTH WITH", WHITE), (34, "big", "ACUTE MI", WHITE), (36, "tag", "WHICH IS THE", WHITE),
               (38, "big", "HEART ATTACK", CYAN)]),
-    (43, 57, [(43, "tag", "THE DOCTOR WILL HAVE TO", WHITE), (46, "big", "SAVE", CYAN), (47, "mid", "THE 35-YEAR-OLD", WHITE)]),
-    (58, 65, [(58, "tag", "AND", WHITE), (61, "big", "LET GO", CYAN), (63, "mid", "THE 75-YEAR-OLD", WHITE)]),
+    (43, 57, [(43, "tag", "THE DOCTOR WILL HAVE TO", WHITE), (46, "big", "SAVE", CYAN)]),
+    (58, 65, [(58, "tag", "AND", WHITE), (61, "big", "LET GO", (196, 198, 204))]),
     (66, 72, [(66, "tag", "IF WE DON'T SOLVE THIS PROBLEM", WHITE), (72, "big", "SOONER.", CYAN)]),
     (87, 91, [(87, "tag", "THIS IS", WHITE), (89, "big", "THE BIGGEST", WHITE), (91, "big", "PANDEMIC.", CYAN)]),
     (96, 101, [(96, "tag", "THERE IS NO", WHITE), (99, "big", "SUDDEN", WHITE), (100, "strike", "", WHITE), (100, "big", "HEART ATTACK", CYAN)]),
@@ -263,6 +262,59 @@ class Callout:
             fr[y:y + hv, x:x + wv] = fr[y:y + hv, x:x + wv] * (1 - al) + arr[:hv, :wv, :3] * 255 * al
 CALLS = [Callout(w0, w1, items) for w0, w1, items in CALLOUTS]
 CALLS.sort(key=lambda c: c.t0)
+
+# ---------------------------------------------------------------- the two patients as cards, side by side
+# 35 (left) and 75 (right) appear as he names them; the 35-year-old card lights up on "save",
+# the 75-year-old card turns grey on "let go". Hidden while "acute MI / heart attack" is on screen.
+CARD_W, CARD_H, CARD_GAP = 440, 250, 40
+CARD_Y = 1160
+CARD_X = [CX, CX + CARD_W + CARD_GAP]
+F_AGE = ImageFont.truetype(POP, 132); F_YRS = ImageFont.truetype(INTER + "Inter-SemiBold.otf", 26)
+F_PILL = ImageFont.truetype(INTER + "Inter-Bold.otf", 24)
+def card_img(age, state):
+    """state: 'normal', 'save' (cyan border + SAVE), 'lost' (grey, dimmed + LET GO)"""
+    pad = 30
+    img = Image.new("RGBA", (CARD_W + 2 * pad, CARD_H + 2 * pad), (0, 0, 0, 0))
+    sh = Image.new("L", img.size, 0); ImageDraw.Draw(sh).rounded_rectangle((pad, pad + 10, pad + CARD_W, pad + CARD_H + 10), 28, fill=150)
+    img.putalpha(sh.filter(ImageFilter.GaussianBlur(16)))
+    d = ImageDraw.Draw(img)
+    fill = {"normal": (18, 26, 42, 205), "save": (12, 40, 58, 225), "lost": (34, 34, 36, 200)}[state]
+    border = {"normal": (255, 255, 255, 70), "save": CYAN + (255,), "lost": (120, 120, 124, 120)}[state]
+    d.rounded_rectangle((pad, pad, pad + CARD_W, pad + CARD_H), 28, fill=fill, outline=border, width=4 if state == "save" else 2)
+    num_col = {"normal": WHITE + (255,), "save": CYAN + (255,), "lost": (132, 132, 136, 255)}[state]
+    d.text((pad + 40, pad + 18), str(age), font=F_AGE, fill=num_col)
+    x = pad + 42
+    for ch in "YEARS OLD":
+        d.text((x, pad + CARD_H - 60), ch, font=F_YRS, fill=(225, 230, 238, 255) if state != "lost" else (130, 130, 134, 255))
+        x += d.textlength(ch, font=F_YRS) + 5
+    if state != "normal":
+        label = "SAVE" if state == "save" else "LET GO"
+        tw_ = d.textlength(label, font=F_PILL)
+        px1 = pad + CARD_W - 28; px0 = px1 - tw_ - 40
+        d.rounded_rectangle((px0, pad + 26, px1, pad + 70), 22, fill=(CYAN + (255,)) if state == "save" else (90, 90, 94, 255))
+        d.text(((px0 + px1) / 2, pad + 48), label, font=F_PILL, fill=(10, 18, 30, 255) if state == "save" else (210, 210, 214, 255), anchor="mm")
+    if state == "lost":                                   # a quiet strike through the grey card
+        d.line((pad + 34, pad + CARD_H / 2 + 6, pad + CARD_W - 34, pad + CARD_H / 2 + 6), fill=(150, 150, 154, 200), width=4)
+    return np.asarray(img).astype(np.float32) / 255
+CARDS_ = {(35, st): card_img(35, st) for st in ("normal", "save")}
+CARDS_.update({(75, st): card_img(75, st) for st in ("normal", "lost")})
+T_C35, T_C75 = out_of(words[23][0]), out_of(words[29][0])
+T_HIDE, T_BACK = out_of(words[32][0]) - 0.1, out_of(words[41][0]) - 0.1
+T_SAVE, T_LOST = out_of(words[46][0]), out_of(words[61][0])
+T_CEND = out_of(words[65][1]) + 0.6
+def draw_cards(fr, tn):
+    vis = (1 - ease((tn - T_HIDE) / 0.3)) if tn < T_BACK else ease((tn - T_BACK) / 0.35)
+    vis *= 1 - ease((tn - T_CEND) / 0.35)
+    if vis <= 0 or tn < T_C35: return
+    for i, (age, t_in, t_state, st) in enumerate(((35, T_C35, T_SAVE, "save"), (75, T_C75, T_LOST, "lost"))):
+        if tn < t_in: continue
+        p = ease((tn - t_in) / 0.35)
+        k = ease((tn - t_state) / 0.4) if tn >= t_state else 0.0
+        A = CARDS_[(age, "normal")] * (1 - k) + CARDS_[(age, st)] * k
+        hh, ww = A.shape[:2]
+        x = CARD_X[i] - 30; y = CARD_Y - 30 + int(24 * (1 - p))
+        al = A[..., 3:4] * p * vis
+        fr[y:y + hh, x:x + ww] = fr[y:y + hh, x:x + ww] * (1 - al) + A[..., :3] * 255 * al
 
 # ---------------------------------------------------------------- end card
 def make_cta(text):
@@ -416,6 +468,7 @@ for fi in range(int(round(TOTAL * FPS))):
         last = fr.copy()
         for c_i, c in enumerate(CALLS):
             c.draw(fr, tn, CALLS[c_i + 1].t0 if c_i + 1 < len(CALLS) else None)
+        draw_cards(fr, tn)
         for s, e, L in caps:
             if s - 0.02 <= tn < e:
                 a = ease((tn - s) / 0.15) * (1 - ease((tn - (e - 0.15)) / 0.15))
