@@ -45,8 +45,7 @@ def page():
     spaced(PX, BY - 104, "KEYNOTE", small, BLUE + (255,))
     d.text((PX, BY - 70), "AnginaX Keynote for Cardiologists", font=big, fill=(255, 255, 255, 255))
     spaced(PX, AY - 104, "DD NEWS HINDI", small, BLUE + (255,))
-    d.text((PX, AY - 70), "Dr Neeraj Desai", font=big, fill=(255, 255, 255, 255))
-    d.text((PX + d.textlength("Dr Neeraj Desai", font=big) + 16, AY - 58), "Cardiologist (Chief Medical Officer)", font=sub, fill=(196, 206, 222, 255))
+    d.text((PX, AY - 70), "Prevent Heart Attack", font=big, fill=(255, 255, 255, 255))
     sh = Image.new("L", (W, H), 0); ds = ImageDraw.Draw(sh)
     for y in (BY, AY): ds.rounded_rectangle((PX, y + 10, PX + PW, y + PH + 10), 18, fill=150)
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0)); shadow.putalpha(sh.filter(ImageFilter.GaussianBlur(16)))
@@ -158,6 +157,30 @@ def end_card(u):
     fr[cy0:cy0 + min(sh, H), cx0:cx0 + min(sw, W)] = sl[cy0 - y0:cy0 - y0 + min(sh, H), cx0 - x0:cx0 - x0 + min(sw, W)]
     return fr * (1 - ease((u - (END - 0.3)) / 0.3))                 # ends cleanly at 2 s
 
+# ---------------------------------------------------------------- name strap on his video: small, white, left, animated in
+def _strap():
+    f1, f2 = F("Inter-SemiBold.otf", 32), F("Inter-Regular.otf", 23)
+    n1, n2 = "Dr Neeraj Desai", "Chief Medical Officer - Cardiology"
+    d0 = ImageDraw.Draw(Image.new("L", (1, 1)))
+    wv = int(max(d0.textlength(n1, font=f1), d0.textlength(n2, font=f2))) + 60
+    img = Image.new("RGBA", (wv, 104), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    d.rounded_rectangle((0, 0, wv - 1, 103), 12, fill=(10, 16, 28, 175))
+    d.rectangle((0, 0, 5, 103), fill=BLUE + (255,))
+    d.text((24, 14), n1, font=f1, fill=(255, 255, 255, 255))
+    d.text((24, 60), n2, font=f2, fill=(222, 228, 238, 255))
+    return np.asarray(img).astype(np.float32) / 255
+STRAP = _strap()
+SX, SY = PX + 22, AY + 318                      # left, just above the channel's orange ticker
+def draw_strap(fr, t):
+    p = ease((t - 0.5) / 0.6)
+    if p <= 0: return
+    hh, ww = STRAP.shape[:2]
+    reveal = int(ww * p)                           # wipes open from the left, sliding in slightly
+    x = SX - int(30 * (1 - p))
+    L = STRAP[:, :reveal]
+    sub = fr[SY:SY + hh, x:x + reveal]; al = L[..., 3:4] * min(1.0, p * 1.4)
+    sub[:] = sub * (1 - al) + L[..., :3] * 255 * al
+
 la = lb = None
 last = None
 for fi in range(int(round((DUR + END) * FPS))):
@@ -173,6 +196,7 @@ for fi in range(int(round((DUR + END) * FPS))):
     fr = PAGE.copy()
     for y, im in ((AY, la), (BY, lb)):
         sub = fr[y:y + PH, PX:PX + PW]; sub[:] = sub * (1 - MASK) + im * MASK
+    draw_strap(fr, t)
     for s, e, L in LAYERS:
         if s <= t < e:
             a = ease((t - s) / 0.15) * (1 - ease((t - (e - 0.15)) / 0.15)) if e < DUR else ease((t - s) / 0.15)
