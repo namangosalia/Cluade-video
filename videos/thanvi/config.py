@@ -55,7 +55,8 @@ STATEMENTS = [
     (36, 43, [("WE BELONG TO THE", "white", 36), ("HIGH-RISK POPULATION.", "accent", 40)], "plain"),
     (61, 76, [("WE CAN STOP A", "white", 62), ("HEALTH-CHECKUP PERSON", "white", 68),
               ("FROM BECOMING A", "small", 72), ("CARDIAC PATIENT.", "accent", 74)], "plain"),
-    (156, 170, [("IT BUILDS", "white", 156), ("METABOLIC PROBLEMS", "white", 157), ("→ CARDIAC ISSUES.", "accent", 166)], "plain"),
+    (156, 170, [("IT BUILDS", "white", 156), ("METABOLIC PROBLEMS", "white", 157), ("LEADING TO", "small", 165),
+                ("CARDIAC ISSUES.", "accent", 168)], "plain"),
     (214, 225, [("RISK-STRATIFY", "white", 214), ("THE PATIENT", "small", 216),
                 ("HIGH OR INTERMEDIATE RISK.", "accent", 220)], "plain"),
 ]
