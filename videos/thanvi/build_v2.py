@@ -109,6 +109,11 @@ for a, b in zip(shots, shots[1:]):
     else:
         FX[a:b], FY[a:b], FS[a:b] = SW / 2, CLEAN_H * 0.4, CLEAN_H / 4
 
+# the opening wide stage shot (part 1, first 13.6 s): he is small at the bottom-centre; the face finder
+# misses him at this size, so his position is set from a full-resolution detection (x~290, y~765, face ~57 px)
+_wide_end = int(13.6 * FPS)
+FX[:_wide_end], FY[:_wide_end], FS[:_wide_end] = 290, 765, 57
+
 def crop_to(src, k, tw, th, mode):
     fx, fy, fs = FX[k], FY[k], FS[k]
     asp = tw / th
