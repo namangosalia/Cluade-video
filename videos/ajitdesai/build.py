@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 TMP = os.path.join(HERE, ".tmp"); os.makedirs(TMP, exist_ok=True); os.makedirs(os.path.join(HERE, "output"), exist_ok=True)
-OUT = os.path.join(HERE, "output", "ajit_desai_9x16.mp4")
+OUT = os.path.join(HERE, "output", "ajit_desai_educational_9x16.mp4")
 W, H, FPS = 1080, 1920, 30
 POP = os.path.join(REPO, "assets", "fonts", "poppins-latin-800-normal.woff")
 INTER = "/usr/share/fonts/opentype/inter/"
@@ -44,8 +44,8 @@ for i, q in enumerate(np.append(rms < SIL, False)):
     if q and s_ is None: s_ = i
     if not q and s_ is not None:
         q0, q1 = s_ / 100, i / 100
-        if q1 - q0 >= 0.45:
-            k = 0.45 if any(e - 0.2 <= q0 <= e + 0.35 for e in ends) else 0.30
+        if q1 - q0 >= 0.18:                                   # smooth: every hesitation gap trimmed to a breath
+            k = 0.26 if any(e - 0.2 <= q0 <= e + 0.35 for e in ends) else 0.14
             if q1 - q0 > k: CUTS.append((q0 + k / 2, q1 - k / 2))
         s_ = None
 XF = 0.7                                              # crossfade between clips (overlapping, no black)
@@ -185,10 +185,10 @@ def cred():
     return np.asarray(img).astype(np.float32) / 255
 CRED = cred()
 CRED_T = (SPAN[1][0] + 0.3, SPAN[1][0] + 6.5)
-CRED_XY = (36, 70)
+CRED_XY = (W - CRED.shape[1] - 6, 760)              # right side, beside his shoulder
 
 def make_cta(text):
-    d = ImageDraw.Draw(Image.new("RGBA", (1, 1))); f = F("Inter-SemiBold.otf", 40); track = 6
+    d = ImageDraw.Draw(Image.new("RGBA", (1, 1))); f = F("Inter-SemiBold.otf", 32); track = 4
     widths = [d.textlength(ch, font=f) for ch in text]; t_w = sum(widths) + track * (len(text) - 1)
     pw, ph, pad = int(t_w + 150), 110, 34
     img = Image.new("RGBA", (pw + 2 * pad, ph + 2 * pad), (0, 0, 0, 0))
@@ -199,7 +199,60 @@ def make_cta(text):
     for ch, wd in zip(text, widths):
         dr.text((x, y), ch, font=f, fill=(34, 36, 40, 255)); x += wd + track
     return np.asarray(img).astype(np.float32) / 255
-CTA = make_cta("LEARN MORE")
+CTA = make_cta("FIND OUT ABOUT YOUR HEARTPASS")
+
+# ---------------------------------------------------------------- educational callouts (below the captions)
+POPB = ImageFont.truetype(POP, 76); POPM = ImageFont.truetype(POP, 46); TAGF = F("Inter-SemiBold.otf", 26)
+CYAN, BLUE_ = (52, 196, 240), (70, 150, 255)
+def tw_(t, f): return dd.textlength(t, font=f)
+def text_block(tag, big, col):
+    wv = int(max(tw_(big, POPB), sum(tw_(c, TAGF) + 5 for c in tag))) + 40
+    img = Image.new("RGBA", (wv, 150), (0, 0, 0, 0))
+    sh = Image.new("L", img.size, 0); ds = ImageDraw.Draw(sh)
+    x = 22
+    for c in tag: ds.text((x, 8), c, font=TAGF, fill=170); x += tw_(c, TAGF) + 5
+    ds.text((22, 44), big, font=POPB, fill=190)
+    s2 = Image.new("RGBA", img.size, (0, 0, 0, 0)); s2.putalpha(sh.filter(ImageFilter.GaussianBlur(8)))
+    img = Image.alpha_composite(img, s2); d = ImageDraw.Draw(img); x = 20
+    for c in tag: d.text((x, 6), c, font=TAGF, fill=(228, 234, 242, 255)); x += tw_(c, TAGF) + 5
+    d.text((20, 40), big, font=POPB, fill=col + (255,))
+    return np.asarray(img).astype(np.float32) / 255
+def chip(label, col, w_=300, h_=120, fill_a=225, icon=None):
+    pad = 18
+    img = Image.new("RGBA", (w_ + 2 * pad, h_ + 2 * pad), (0, 0, 0, 0))
+    sh = Image.new("L", img.size, 0); ImageDraw.Draw(sh).rounded_rectangle((pad, pad + 8, pad + w_, pad + h_ + 8), 24, fill=150)
+    img.putalpha(sh.filter(ImageFilter.GaussianBlur(12))); d = ImageDraw.Draw(img)
+    d.rounded_rectangle((pad, pad, pad + w_, pad + h_), 24, fill=(12, 18, 30, fill_a), outline=col + (255,), width=4)
+    f = POPM if tw_(label, POPM) < w_ - 40 else ImageFont.truetype(POP, 34)
+    d.text((pad + w_ / 2 + (18 if icon else 0), pad + h_ / 2), label, font=f, fill=col + (255,), anchor="mm")
+    if icon == "check":
+        cx = pad + w_ / 2 - tw_(label, f) / 2 - 22; cy = pad + h_ / 2
+        d.line((cx - 16, cy, cx - 5, cy + 12, cx + 14, cy - 14), fill=col + (255,), width=7)
+    return np.asarray(img).astype(np.float32) / 255
+RED_, AMB_, GRN_ = (236, 78, 74), (242, 184, 60), (88, 206, 120)
+T = lambda i, c: out_of(words[i][0], c)
+TE = lambda i, c: out_of(words[i][1], c)
+EDU = []     # (t_in, t_out, [(t_appear, layer, x, y)])
+def add(t_in, t_out, items): EDU.append((t_in, t_out, items))
+Y0 = 1330
+b = text_block("ANGINAX HELPS DOCTORS", "SCREEN", CYAN); add(T(26, 1), T(29, 1), [(T(26, 1), b, (W - b.shape[1]) // 2, Y0)])
+cards = [chip("HIGH", RED_, 280), chip("MODERATE", AMB_, 280), chip("LOW", GRN_, 280)]
+cx3 = [(W - 3 * cards[0].shape[1] + 2 * 12) // 2 + i * (cards[0].shape[1] - 12) for i in range(3)]
+add(T(32, 1) - 0.1, TE(47, 1), [(T(32, 1), cards[0], cx3[0], Y0), (T(35, 1), cards[1], cx3[1], Y0), (T(38, 1), cards[2], cx3[2], Y0)])
+b = text_block("TAKES ONLY ABOUT", "2 MINUTES", CYAN); add(T(59, 1), TE(70, 1), [(T(66, 1) - 0.2, b, (W - b.shape[1]) // 2, Y0)])
+add(T(117, 2) - 0.1, TE(124, 2), [(T(118, 2), cards[0], cx3[0], Y0), (T(121, 2), cards[1], cx3[1], Y0)])
+m1, m2 = chip("MEDICATION", CYAN, 420, 110), chip("FURTHER INVESTIGATION", CYAN, 520, 110)
+add(T(129, 2) - 0.1, TE(134, 2) + 0.2, [(T(129, 2), m1, (W - m1.shape[1]) // 2, Y0), (T(132, 2), m2, (W - m2.shape[1]) // 2, Y0 + 140)])
+tc = chip("TAKE CARE", BLUE_, 480, 120, icon="check")
+add(T(135, 2) - 0.05, SPAN[2][1] + 0.3, [(T(136, 2), tc, (W - tc.shape[1]) // 2, Y0)])
+def draw_edu(fr, tn):
+    for t_in, t_out, items in EDU:
+        if not (t_in <= tn < t_out + 0.3): continue
+        o = 1 - ease((tn - t_out) / 0.3)
+        for ta, L, x, y in items:
+            if tn < ta: continue
+            p = ease((tn - ta) / 0.3)
+            put(fr, L, x, y + int(22 * (1 - p)), p * o)
 
 # ---------------------------------------------------------------- audio (pieces placed on the timeline; overlaps crossfade)
 cutwav = os.path.join(TMP, "cut.wav")
@@ -251,9 +304,10 @@ for fi in range(int(round(TOTAL * FPS))):
                 sc = 0.94 + 0.06 * p
                 Ls = cv2.resize(L, (int(L.shape[1] * sc), int(L.shape[0] * sc)), interpolation=cv2.INTER_AREA) if sc < 0.999 else L
                 put(fr, Ls, (W - Ls.shape[1]) // 2, CAP_CY - Ls.shape[0] // 2, p * q); break
+        draw_edu(fr, tn)
         if CRED_T[0] <= tn < CRED_T[1]:
             a = ease((tn - CRED_T[0]) / 0.5) * (1 - ease((tn - (CRED_T[1] - 0.5)) / 0.5))
-            put(fr, CRED, CRED_XY[0] + int(30 * (1 - a)), CRED_XY[1], a)
+            put(fr, CRED, CRED_XY[0] + int(40 * (1 - a)), CRED_XY[1], a)
     else:
         u = tn - BODY
         blur = cv2.GaussianBlur(last, (0, 0), 26) * 0.55
