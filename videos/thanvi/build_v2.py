@@ -121,6 +121,7 @@ def crop_to(src, k, tw, th, mode):
     elif mode == "close": ch = float(np.clip(fs * 3.4, 420, CLEAN_H))
     elif mode == "wide": ch = SW / asp
     else: ch = float(np.clip(fs * 3.0, 420, CLEAN_H))
+    if k < _wide_end and mode in ("low", "close", "full"): ch = 300.0     # wide stage shot: closer on him
     cw = ch * asp
     if cw > SW: cw = SW; ch = cw / asp
     ch = min(ch, CLEAN_H); cw = ch * asp
