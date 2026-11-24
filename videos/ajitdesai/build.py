@@ -34,8 +34,8 @@ w = wave.open(wav); a16 = np.frombuffer(w.readframes(w.getnframes()), np.int16).
 B1, B2 = 7.19, 7.19 + 36.50
 
 # ---------------------------------------------------------------- edit
-CLIPS = [(0.0, 6.95), (7.15, B2 - 0.05), (B2, words[-1][1] + 0.35)]
-CUTS = [(24.05, 25.45)]                               # "...advise them, called (pause)" -> "advise them. The process..."
+CLIPS = [(0.0, 7.12), (7.15, B2 - 0.05), (B2, words[-1][1] + 0.35)]
+CUTS = [(24.18, 25.45)]                               # "...advise them, called (pause)" -> "advise them. The process..."
 rms = np.array([20 * np.log10(np.sqrt(np.mean(a16[i:i + 400] ** 2)) + 1e-9) for i in range(0, len(a16), 160)])
 SIL = min(-30.0, float(np.percentile(rms[rms > -90], 90)) - 16.0)
 ends = [wd[1] for wd in words if wd[2].strip().endswith((".", "?", "!", ","))]
@@ -170,22 +170,22 @@ CAP_CY = int(H * 0.60)
 
 # ---------------------------------------------------------------- credentials card (when clip 2 starts)
 def cred():
-    f1, f2, f3 = F("Inter-Bold.otf", 46), F("Inter-SemiBold.otf", 28), F("Inter-Regular.otf", 25)
+    f1, f2, f3 = F("Inter-Bold.otf", 54), F("Inter-SemiBold.otf", 33), F("Inter-Regular.otf", 29)
     t1, t2, t3 = "Dr Ajit Desai", "Additional Director of Cardiology", "Jaslok Hospital & Research Centre, Mumbai"
     wv = int(max(dd.textlength(t1, font=f1), dd.textlength(t2, font=f2), dd.textlength(t3, font=f3))) + 64
-    pad = 24; hh = 168
+    pad = 24; hh = 196
     img = Image.new("RGBA", (wv + 2 * pad, hh + 2 * pad), (0, 0, 0, 0))
     sh = Image.new("L", img.size, 0); ImageDraw.Draw(sh).rounded_rectangle((pad, pad + 8, pad + wv, pad + hh + 8), 20, fill=140)
     img.putalpha(sh.filter(ImageFilter.GaussianBlur(14))); d = ImageDraw.Draw(img)
     d.rounded_rectangle((pad, pad, pad + wv, pad + hh), 20, fill=(10, 16, 28, 215))
     d.rectangle((pad, pad + 16, pad + 6, pad + hh - 16), fill=(52, 196, 240, 255))
     d.text((pad + 30, pad + 18), t1, font=f1, fill=(255, 255, 255, 255))
-    d.text((pad + 30, pad + 80), t2, font=f2, fill=(255, 205, 96, 255))
-    d.text((pad + 30, pad + 120), t3, font=f3, fill=(214, 224, 238, 255))
+    d.text((pad + 30, pad + 90), t2, font=f2, fill=(255, 205, 96, 255))
+    d.text((pad + 30, pad + 140), t3, font=f3, fill=(214, 224, 238, 255))
     return np.asarray(img).astype(np.float32) / 255
 CRED = cred()
 CRED_T = (SPAN[1][0] + 0.3, SPAN[1][0] + 6.5)
-CRED_XY = (36, 150)
+CRED_XY = (36, 70)
 
 def make_cta(text):
     d = ImageDraw.Draw(Image.new("RGBA", (1, 1))); f = F("Inter-SemiBold.otf", 40); track = 6
