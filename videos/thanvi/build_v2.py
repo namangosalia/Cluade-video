@@ -126,7 +126,7 @@ def crop_to(src, k, tw, th, mode):
     return out * 1.3 - cv2.GaussianBlur(out, (0, 0), 2.0) * 0.3
 
 MODES = {0: [(61, "close")],
-         1: [(0, "full"), (19, "close"), (31, "split"), (43, "full"), (54, "close"), (76, "split"), (95, "full"),
+         1: [(0, "split"), (19, "close"), (31, "split"), (43, "full"), (54, "close"), (76, "split"), (95, "full"),
              (112, "close"), (121, "split"), (141, "close"), (146, "full"), (170, "split"), (192, "close"), (209, "full"), (214, "close")]}
 MODE_T = sorted([(out_of(TW0(wi), ci) - 0.08 if wi else SPAN[ci][0], m) for ci, lst in MODES.items() for wi, m in lst])
 def mode_at(tn):
@@ -276,9 +276,14 @@ class Callout:
 CALLS = sorted([Callout(*c) for c in CALLOUTS], key=lambda c: c.t0)
 
 # ---------------------------------------------------------------- logo (top right) and end card
-_logo = Image.open(os.path.join(REPO, "assets", "logo_on_dark.png")).convert("RGBA")
-_lw = 175; _logo = _logo.resize((_lw, int(_logo.height * _lw / _logo.width)), Image.LANCZOS)
-LOGO = np.asarray(_logo).astype(np.float32) / 255
+_lw = 175
+def _ld(name):
+    im = Image.open(os.path.join(REPO, "assets", name)).convert("RGBA")
+    return np.asarray(im.resize((_lw, int(im.height * _lw / im.width)), Image.LANCZOS)).astype(np.float32) / 255
+LOGO_DARKBG, LOGO_LIGHTBG = _ld("logo_on_dark.png"), _ld("logo_original.png")      # white wordmark / dark wordmark
+# soft dark gradient behind the captions and callouts: the stage background here is bright white
+_g = np.clip((np.arange(H, dtype=np.float32) - 760) / 560, 0, 1)
+SCRIM = (0.68 * _g ** 1.3)[:, None, None]
 LOGO_XY = (W - _lw - 56, 70)
 def make_cta(text):
     d = ImageDraw.Draw(Image.new("RGBA", (1, 1))); f = ImageFont.truetype(INTER + "Inter-SemiBold.otf", 40); track = 6
@@ -351,8 +356,13 @@ for i, (o0, o1, s, ci) in enumerate(timeline):
 fl.append(f"[1:a]adelay={int(round(ECG_T0 * 1000))}:all=1[ecg];")
 mix = "".join(fl) + "".join(f"[a{i}]" for i in range(len(timeline))) + f"[ecg]amix=inputs={len(timeline) + 1}:normalize=0,apad=whole_dur={TOTAL:.3f}[a]"
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", combp, "-i", ecg_wav, "-filter_complex", mix, "-map", "[a]", "-ar", "48000", "-t", f"{TOTAL:.3f}", cutwav], check=True)
-VOICE = ("highpass=f=80,equalizer=f=250:t=q:w=1:g=-2,equalizer=f=3200:t=q:w=1.2:g=2.5,highshelf=f=9000:g=1.5,"
-         "deesser=i=0.35,acompressor=threshold=0.1:ratio=2.5:attack=8:release=150:makeup=1.5,loudnorm=I=-14:TP=-1:LRA=7")
+_pre = ("highpass=f=80,equalizer=f=250:t=q:w=1:g=-2,equalizer=f=3200:t=q:w=1.2:g=2.5,highshelf=f=9000:g=1.5,"
+        "deesser=i=0.35,acompressor=threshold=0.1:ratio=2.5:attack=8:release=150:makeup=1.5")
+_m = subprocess.run(["ffmpeg", "-hide_banner", "-i", cutwav, "-af", _pre + ",loudnorm=I=-14:TP=-1:LRA=7:print_format=json", "-f", "null", "-"],
+                    capture_output=True, text=True).stderr
+_j = json.loads(_m[_m.rindex("{"):_m.rindex("}") + 1])
+VOICE = (_pre + f",loudnorm=I=-14:TP=-1:LRA=7:measured_I={_j['input_i']}:measured_TP={_j['input_tp']}:"
+         f"measured_LRA={_j['input_lra']}:measured_thresh={_j['input_thresh']}:offset={_j['target_offset']}:linear=true")
 
 # ---------------------------------------------------------------- render
 enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
@@ -381,6 +391,7 @@ for fi in range(int(round(TOTAL * FPS))):
                 enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes()); continue
         if tn < 0.4: fr = fr * ease(tn / 0.4)
         last = fr.copy()
+        fr = fr * (1 - SCRIM)
         for c_i, c in enumerate(CALLS):
             c.draw(fr, tn, CALLS[c_i + 1].t0 if c_i + 1 < len(CALLS) else None)
         for s, e, L in caps:
@@ -389,7 +400,8 @@ for fi in range(int(round(TOTAL * FPS))):
                 hh = L.shape[0]; al = L[..., 3:4] * a
                 fr[CAP_Y:CAP_Y + hh] = fr[CAP_Y:CAP_Y + hh] * (1 - al) + L[..., :3] * 255 * al
                 break
-        put(fr, LOGO, LOGO_XY[0], LOGO_XY[1], 1.0)
+        reg = fr[LOGO_XY[1]:LOGO_XY[1] + LOGO_DARKBG.shape[0], LOGO_XY[0]:LOGO_XY[0] + _lw]
+        put(fr, LOGO_LIGHTBG if reg.mean() > 150 else LOGO_DARKBG, LOGO_XY[0], LOGO_XY[1], 1.0)
     else:
         u = tn - BODY
         blur = cv2.GaussianBlur(last, (0, 0), 26) * 0.55
