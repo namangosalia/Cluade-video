@@ -4,7 +4,8 @@ left, small sentence captions low on screen).
 
 - top: the original wide shot (all three on the panel); bottom: Dr Mehta (centre seat) zoomed in;
   on a few phrases the whole frame goes to him
-- credentials top right: PADMA BHUSHAN / Dr A B Mehta / Pioneer of Interventional Cardiology (animated in)
+- credentials as a readable card on the right side (PADMA BHUSHAN / Dr A B Mehta / Pioneer of Interventional
+  Cardiology), 'PRESS CONFERENCE · MUMBAI' label top left; no running Hindi subtitles
 - his Hindi as captions in English letters (not translated); long pauses shortened; room noise reduced
 - ends on LEARN MORE
 """
@@ -78,7 +79,7 @@ TOP_H = int(round(W * SH / SW))                     # 1080 x 530: the whole wide
 def view(src, tw, th, ch, yfrac):
     asp = tw / th; cw = ch * asp
     if cw > SW: cw = SW; ch = cw / asp
-    x0 = float(np.clip(FXc - cw / 2, 0, SW - cw)); y0 = float(np.clip(FYc - ch * yfrac, 0, SH - ch))
+    x0 = float(np.clip(FXc - cw * 0.38, 0, SW - cw)); y0 = float(np.clip(FYc - ch * yfrac, 0, SH - ch))   # him a little left: room on the right
     sc = tw / cw
     M = np.array([[sc, 0, -x0 * sc], [0, sc, -y0 * sc]], np.float32)
     o = cv2.warpAffine(src, M, (tw, th), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
@@ -196,6 +197,43 @@ def cred_layer():
     img = Image.alpha_composite(img, s2); draw(ImageDraw.Draw(img), False)
     return np.asarray(img).astype(np.float32) / 255
 CRED = cred_layer()
+
+# credentials card on the right side (readable: solid dark card, larger type), clear of the reel's right-edge buttons
+def cred_card():
+    f1 = ImageFont.truetype(os.path.join(REPO, "assets", "fonts", "poppins-latin-700-normal.woff"), 30)
+    f2 = F("Inter-Bold.otf", 44); f3 = F("Inter-SemiBold.otf", 25)
+    d0 = ImageDraw.Draw(Image.new("L", (1, 1)))
+    t1, t2, t3 = "PADMA BHUSHAN", "Dr A B Mehta", "Pioneer of Interventional Cardiology"
+    w1 = sum(d0.textlength(c, font=f1) + 5 for c in t1) - 5
+    wv = int(max(w1, d0.textlength(t2, font=f2), d0.textlength(t3, font=f3))) + 64
+    pad = 24
+    img = Image.new("RGBA", (wv + 2 * pad, 190 + 2 * pad), (0, 0, 0, 0))
+    sh = Image.new("L", img.size, 0); ImageDraw.Draw(sh).rounded_rectangle((pad, pad + 8, pad + wv, pad + 190 + 8), 22, fill=150)
+    img.putalpha(sh.filter(ImageFilter.GaussianBlur(14)))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((pad, pad, pad + wv, pad + 190), 22, fill=(10, 16, 28, 222))
+    d.rectangle((pad + wv - 6, pad + 18, pad + wv, pad + 172), fill=CYAN + (255,))
+    xr = pad + wv - 30
+    x = xr - w1
+    for c in t1:
+        d.text((x, pad + 22), c, font=f1, fill=(255, 205, 96, 255)); x += d.textlength(c, font=f1) + 5    # warm gold: the honour
+    d.text((xr, pad + 66), t2, font=f2, fill=(255, 255, 255, 255), anchor="ra")
+    d.text((xr, pad + 132), t3, font=f3, fill=(214, 224, 238, 255), anchor="ra")
+    return np.asarray(img).astype(np.float32) / 255
+CRED2 = cred_card()
+CRED_X, CRED_Y = W - CRED2.shape[1] - 70, 640       # right side, below the top band, above the reel's right-hand buttons
+def place_label():
+    f = F("Inter-SemiBold.otf", 26)
+    img = Image.new("RGBA", (W - 80, 70), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    d.ellipse((4, 22, 20, 38), fill=(232, 60, 60, 255))
+    x = 34
+    for c in "PRESS CONFERENCE  \u00b7  MUMBAI":
+        d.text((x + 2, 17), c, font=f, fill=(0, 0, 0, 140)); x += d.textlength(c, font=f) + 4
+    x = 34
+    for c in "PRESS CONFERENCE  \u00b7  MUMBAI":
+        d.text((x, 15), c, font=f, fill=(255, 255, 255, 255)); x += d.textlength(c, font=f) + 4
+    return np.asarray(img).astype(np.float32) / 255
+PLACE = place_label()
 _g = np.clip(1 - np.arange(360, dtype=np.float32) / 360, 0, 1)
 TOPSCRIM = (0.78 * _g ** 1.2)[:, None, None]
 _gb = np.clip((np.arange(H, dtype=np.float32) - 1020) / 520, 0, 1)
@@ -242,7 +280,8 @@ def frame_at(k):
     if ok: _cur[0] = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
     return _cur[0]
 def put(fr, L, x, y, a):
-    hh, ww = L.shape[:2]; sub = fr[y:y + hh, x:x + ww]; al = L[..., 3:4] * a
+    hh, ww = min(L.shape[0], H - y), min(L.shape[1], W - x)          # clip to the frame (slide-ins)
+    L = L[:hh, :ww]; sub = fr[y:y + hh, x:x + ww]; al = L[..., 3:4] * a
     sub[:] = sub * (1 - al) + L[..., :3] * 255 * al
 last, prev_k, prev_img = None, -1, None
 for fi in range(int(round(TOTAL * FPS))):
@@ -256,14 +295,12 @@ for fi in range(int(round(TOTAL * FPS))):
         last = fr.copy()
         fr[:360] *= (1 - TOPSCRIM); fr *= (1 - SCRIM)
         for i, c in enumerate(CALLS): c.draw(fr, tn, CALLS[i + 1].t0 if i + 1 < len(CALLS) else None)
-        for s, e, L in caps:
-            if s - 0.02 <= tn < e:
-                a = ease((tn - s) / 0.15) * (1 - ease((tn - (e - 0.15)) / 0.15))
-                put(fr, L, 0, CAP_Y, a); break
-        pc = ease((tn - 0.6) / 0.6)                                   # credentials slide in from the right
+        # (no running Hindi subtitles: Naman asked for none)
+        pc = ease((tn - 0.6) / 0.6)                                   # credentials card slides in from the right
         if pc > 0:
-            sh_ = int(60 * (1 - pc)); L = CRED[:, : W - sh_] if sh_ else CRED
-            put(fr, L, sh_, 40, pc)
+            put(fr, CRED2, CRED_X + int(70 * (1 - pc)), CRED_Y, pc)
+        pl = ease((tn - 0.3) / 0.5)
+        if pl > 0: put(fr, PLACE, 40, 40, pl)
     else:
         u = tn - BODY
         blur = cv2.GaussianBlur(last, (0, 0), 26) * 0.55
