@@ -37,7 +37,7 @@ B1, B2 = 7.19, 7.19 + 36.50
 CLIPS = [(0.0, 7.12), (7.15, B2 - 0.05), (B2, words[-1][1] + 0.35)]
 CUTS = [(24.18, 25.45)]                               # "...advise them, called (pause)" -> "advise them. The process..."
 rms = np.array([20 * np.log10(np.sqrt(np.mean(a16[i:i + 400] ** 2)) + 1e-9) for i in range(0, len(a16), 160)])
-SIL = min(-30.0, float(np.percentile(rms[rms > -90], 90)) - 16.0)
+SIL = -37.0                                            # quiet hall: pauses sit at about -40 dB, speech -26 to -34
 ends = [wd[1] for wd in words if wd[2].strip().endswith((".", "?", "!", ","))]
 s_ = None
 for i, q in enumerate(np.append(rms < SIL, False)):
