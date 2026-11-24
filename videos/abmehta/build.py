@@ -79,7 +79,7 @@ TOP_H = int(round(W * SH / SW))                     # 1080 x 530: the whole wide
 def view(src, tw, th, ch, yfrac):
     asp = tw / th; cw = ch * asp
     if cw > SW: cw = SW; ch = cw / asp
-    x0 = float(np.clip(FXc - cw * 0.38, 0, SW - cw)); y0 = float(np.clip(FYc - ch * yfrac, 0, SH - ch))   # him a little left: room on the right
+    x0 = float(np.clip(FXc - cw * 0.34, 0, SW - cw)); y0 = float(np.clip(FYc - ch * yfrac, 0, SH - ch))   # him a little left: room on the right
     sc = tw / cw
     M = np.array([[sc, 0, -x0 * sc], [0, sc, -y0 * sc]], np.float32)
     o = cv2.warpAffine(src, M, (tw, th), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
@@ -221,7 +221,7 @@ def cred_card():
     d.text((xr, pad + 132), t3, font=f3, fill=(214, 224, 238, 255), anchor="ra")
     return np.asarray(img).astype(np.float32) / 255
 CRED2 = cred_card()
-CRED_X, CRED_Y = W - CRED2.shape[1] - 70, 640       # right side, below the top band, above the reel's right-hand buttons
+CRED_X, CRED_Y = W - CRED2.shape[1] + 4, 640       # tucked to the right edge, clear of his face       # right side, below the top band, above the reel's right-hand buttons
 def place_label():
     f = F("Inter-SemiBold.otf", 26)
     img = Image.new("RGBA", (W - 80, 70), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
